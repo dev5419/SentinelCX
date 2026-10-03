@@ -1,0 +1,30 @@
+# Python
+venv/
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+
+# Environment
+.env
+
+# IDE
+.vscode/
+.idea/
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+
+# Data / caches
+chroma_db/
+*.sqlite
+*.db
+metrics.json
+
+# OS
+Thumbs.db
+.DS_Store
+
+# Scratch / audit artifacts (keep .md docs)
+scratch/

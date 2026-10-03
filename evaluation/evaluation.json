@@ -1,0 +1,322 @@
+[
+  {
+    "query": "refund not received after cancellation",
+    "expected_action": "answer",
+    "expected_docs": ["refund_status.md", "refund_processing_time.md"],
+    "reference_answer": "Refunds are usually processed within 5 to 7 business days after cancellation."
+  },
+  {
+    "query": "charged after subscription cancellation",
+    "expected_action": "escalate",
+    "expected_docs": ["subscription_charged_after_cancellation.md"],
+    "reference_answer": ""
+  },
+  {
+    "query": "how long does it take to get refund",
+    "expected_action": "answer",
+    "expected_docs": ["refund_processing_time.md"],
+    "reference_answer": "Refund processing typically takes between 5 and 7 business days."
+  },
+  {
+    "query": "refund declined without reason",
+    "expected_action": "escalate",
+    "expected_docs": ["refund_declined.md"],
+    "reference_answer": ""
+  },
+  {
+    "query": "can I get refund after trial cancellation",
+    "expected_action": "answer",
+    "expected_docs": ["refund_after_trial_cancellation.md"],
+    "reference_answer": "Refunds after trial cancellation depend on whether a charge was made during the trial."
+  },
+  {
+    "query": "charged twice for same payment",
+    "expected_action": "answer",
+    "expected_docs": ["duplicate_payment_refund.md", "card_charged_twice.md"],
+    "reference_answer": "Duplicate charges are eligible for refund once verified."
+  },
+  {
+    "query": "refund sent but not reflected in bank",
+    "expected_action": "answer",
+    "expected_docs": ["refund_not_reflected_in_bank.md"],
+    "reference_answer": "Banks may take additional time to reflect refunds after processing."
+  },
+  {
+    "query": "refund for annual plan after 3 months",
+    "expected_action": "escalate",
+    "expected_docs": ["refund_on_annual_plan.md"],
+    "reference_answer": ""
+  },
+
+  {
+    "query": "forgot my password",
+    "expected_action": "answer",
+    "expected_docs": ["forgot_password.md"],
+    "reference_answer": "You can reset your password using the 'Forgot Password' option on the login page."
+  },
+  {
+    "query": "password reset email not received",
+    "expected_action": "answer",
+    "expected_docs": ["password_reset_email_not_received.md"],
+    "reference_answer": "If the password reset email is not received, users should check spam or retry after some time."
+  },
+  {
+    "query": "account locked after too many login attempts",
+    "expected_action": "answer",
+    "expected_docs": ["account_locked_after_failed_attempts.md"],
+    "reference_answer": "Accounts may be temporarily locked after multiple failed login attempts."
+  },
+  {
+    "query": "cannot login from new device",
+    "expected_action": "answer",
+    "expected_docs": ["login_from_new_device_blocked.md"],
+    "reference_answer": "Logins from new devices may require additional verification."
+  },
+  {
+    "query": "login page stuck loading",
+    "expected_action": "clarify",
+    "expected_docs": ["login_page_stuck_loading.md"],
+    "reference_answer": ""
+  },
+  {
+    "query": "2fa not working on my account",
+    "expected_action": "answer",
+    "expected_docs": ["2fa_not_working.md"],
+    "reference_answer": "Two-factor authentication issues may occur if time sync or device settings are incorrect."
+  },
+
+  {
+    "query": "how to upgrade my subscription",
+    "expected_action": "answer",
+    "expected_docs": ["upgrade_subscription_plan.md"],
+    "reference_answer": "Subscription plans can be upgraded from the account settings page."
+  },
+  {
+    "query": "downgrade plan but charged full amount",
+    "expected_action": "answer",
+    "expected_docs": ["downgrade_effective_date_confusion.md"],
+    "reference_answer": "Downgrades usually take effect at the end of the current billing cycle."
+  },
+  {
+    "query": "cancel my subscription immediately",
+    "expected_action": "answer",
+    "expected_docs": ["cancel_subscription.md"],
+    "reference_answer": "Subscriptions can be canceled from the billing section of the account."
+  },
+  {
+    "query": "subscription still active after cancellation",
+    "expected_action": "answer",
+    "expected_docs": ["subscription_status_incorrect.md"],
+    "reference_answer": "Subscriptions may remain active until the end of the billing period."
+  },
+  {
+    "query": "subscription renewal failed",
+    "expected_action": "answer",
+    "expected_docs": ["subscription_renewal_failed.md"],
+    "reference_answer": "Subscription renewals may fail due to payment issues or expired methods."
+  },
+  {
+    "query": "charged even though subscription is paused",
+    "expected_action": "escalate",
+    "expected_docs": ["pause_subscription.md"],
+    "reference_answer": ""
+  },
+
+  {
+    "query": "invoice not generated for last payment",
+    "expected_action": "answer",
+    "expected_docs": ["invoice_not_generated.md"],
+    "reference_answer": "Invoices may take some time to generate after payment confirmation."
+  },
+  {
+    "query": "wrong company name on invoice",
+    "expected_action": "answer",
+    "expected_docs": ["invoice_shows_wrong_company_name.md"],
+    "reference_answer": "Billing details can be updated before regenerating invoices."
+  },
+  {
+    "query": "billing email not received",
+    "expected_action": "answer",
+    "expected_docs": ["billing_email_not_received.md"],
+    "reference_answer": "Billing emails may be delayed or sent to spam folders."
+  },
+  {
+    "query": "international payment failed",
+    "expected_action": "answer",
+    "expected_docs": ["international_payment_failed.md"],
+    "reference_answer": "International payments may fail due to bank or network restrictions."
+  },
+  {
+    "query": "unauthorized charge on my card",
+    "expected_action": "escalate",
+    "expected_docs": ["unauthorized_charge.md"],
+    "reference_answer": ""
+  },
+
+  {
+    "query": "my issue is urgent please fix immediately",
+    "expected_action": "clarify",
+    "expected_docs": [],
+    "reference_answer": ""
+  },
+  {
+    "query": "this is unacceptable service",
+    "expected_action": "clarify",
+    "expected_docs": [],
+    "reference_answer": ""
+  },
+  {
+    "query": "refund promised but still pending after 10 days",
+    "expected_action": "answer",
+    "expected_docs": ["refund_delayed_beyond_timeline.md", "refund_processing_time.md"],
+    "reference_answer": "Refunds can take longer than expected due to bank processing delays."
+  },
+  {
+    "query": "partial refund but full amount was charged",
+    "expected_action": "answer",
+    "expected_docs": ["partial_refund_request.md"],
+    "reference_answer": "Partial refunds may apply depending on usage or policy conditions."
+  },
+  {
+    "query": "refund reversed after being completed",
+    "expected_action": "escalate",
+    "expected_docs": ["refund_reversed.md"],
+    "reference_answer": ""
+  },
+  {
+    "query": "refund for unused credits",
+    "expected_action": "answer",
+    "expected_docs": ["refund_for_unused_credits.md"],
+    "reference_answer": "Refunds for unused credits depend on the subscription policy."
+  },
+  {
+    "query": "refund requested after account suspension",
+    "expected_action": "escalate",
+    "expected_docs": ["refund_after_account_suspension.md"],
+    "reference_answer": ""
+  },
+
+  {
+    "query": "login keeps expiring every few minutes",
+    "expected_action": "answer",
+    "expected_docs": ["session_expired_repeatedly.md"],
+    "reference_answer": "Session expiration may occur due to browser or security settings."
+  },
+  {
+    "query": "login works on phone but not on laptop",
+    "expected_action": "answer",
+    "expected_docs": ["login_works_on_mobile_but_not_desktop.md"],
+    "reference_answer": "Browser compatibility issues can cause login failures on desktop."
+  },
+  {
+    "query": "account access revoked without notice",
+    "expected_action": "escalate",
+    "expected_docs": ["account_access_revoked.md"],
+    "reference_answer": ""
+  },
+  {
+    "query": "captcha not showing on login page",
+    "expected_action": "answer",
+    "expected_docs": ["captcha_not_loading.md"],
+    "reference_answer": "Captcha issues may be caused by network or browser settings."
+  },
+  {
+    "query": "login redirect loop keeps happening",
+    "expected_action": "answer",
+    "expected_docs": ["login_redirect_loop.md"],
+    "reference_answer": "Redirect loops may occur due to cookies or cached session data."
+  },
+
+  {
+    "query": "subscription activated but features missing",
+    "expected_action": "answer",
+    "expected_docs": ["plan_features_not_reflected.md"],
+    "reference_answer": "Feature access may take some time to sync after activation."
+  },
+  {
+    "query": "subscription charged twice in same month",
+    "expected_action": "answer",
+    "expected_docs": ["multiple_subscriptions_active.md"],
+    "reference_answer": "Multiple active subscriptions can result in duplicate charges."
+  },
+  {
+    "query": "subscription renewal attempted but failed",
+    "expected_action": "answer",
+    "expected_docs": ["subscription_renewal_failed.md"],
+    "reference_answer": "Renewals may fail due to expired or invalid payment methods."
+  },
+  {
+    "query": "subscription canceled but auto-renew still on",
+    "expected_action": "escalate",
+    "expected_docs": ["auto_renewal_failed.md"],
+    "reference_answer": ""
+  },
+  {
+    "query": "downgrade applied immediately instead of next cycle",
+    "expected_action": "escalate",
+    "expected_docs": ["downgrade_effective_date_confusion.md"],
+    "reference_answer": ""
+  },
+
+  {
+    "query": "invoice missing gst details",
+    "expected_action": "answer",
+    "expected_docs": ["gst_invoice_request.md"],
+    "reference_answer": "GST details can be updated before regenerating invoices."
+  },
+  {
+    "query": "billing currency shown incorrectly",
+    "expected_action": "answer",
+    "expected_docs": ["billing_currency_mismatch.md"],
+    "reference_answer": "Billing currency depends on account and payment settings."
+  },
+  {
+    "query": "payment stuck in pending state",
+    "expected_action": "answer",
+    "expected_docs": ["payment_stuck_in_pending.md"],
+    "reference_answer": "Pending payments usually resolve automatically or require retry."
+  },
+  {
+    "query": "late fee charged unexpectedly",
+    "expected_action": "answer",
+    "expected_docs": ["late_fee_charged.md"],
+    "reference_answer": "Late fees may apply if payment deadlines are missed."
+  },
+  {
+    "query": "bank transfer failed but account debited",
+    "expected_action": "escalate",
+    "expected_docs": ["bank_transfer_failed.md"],
+    "reference_answer": ""
+  },
+
+  {
+    "query": "this refund policy makes no sense",
+    "expected_action": "clarify",
+    "expected_docs": [],
+    "reference_answer": ""
+  },
+  {
+    "query": "why are you stealing my money",
+    "expected_action": "clarify",
+    "expected_docs": [],
+    "reference_answer": ""
+  },
+  {
+    "query": "support never helps me",
+    "expected_action": "clarify",
+    "expected_docs": [],
+    "reference_answer": ""
+  },
+  {
+    "query": "fix this now",
+    "expected_action": "clarify",
+    "expected_docs": [],
+    "reference_answer": ""
+  },
+  {
+    "query": "my problem is different from everything listed",
+    "expected_action": "clarify",
+    "expected_docs": [],
+    "reference_answer": ""
+  }
+]
