@@ -28,3 +28,6 @@ Thumbs.db
 
 # Scratch / audit artifacts (keep .md docs)
 scratch/
+
+AUDIT_V2.md
+AUDIT.md
