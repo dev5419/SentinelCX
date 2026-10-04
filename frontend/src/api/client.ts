@@ -136,7 +136,11 @@ export interface RedteamAttackResult {
   blocked_by: string;
   outcome: string;
   passed: boolean;
-  trace: string[];
+  trace: Array<{
+    node: string;
+    summary: string;
+    duration_ms: number;
+  }>;
 }
 
 export interface RedteamReport {
@@ -219,6 +223,12 @@ export async function fetchAuditLogs(action?: string, limit: number = 50): Promi
 export async function fetchPiiFeed(limit: number = 25): Promise<PiiFeedItem[]> {
   const res = await fetch(`${API_BASE_URL}/pii-feed?limit=${limit}`);
   if (!res.ok) throw new Error('Failed to fetch PII audit feed');
+  return res.json();
+}
+
+export async function fetchRedteamReport(): Promise<RedteamReport> {
+  const res = await fetch(`${API_BASE_URL}/redteam`);
+  if (!res.ok) throw new Error('Failed to fetch redteam report');
   return res.json();
 }
 

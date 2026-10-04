@@ -40,7 +40,7 @@ export const LandingView: React.FC<LandingViewProps> = ({
           className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-sky-950/80 border border-sky-800/80 text-sky-300 text-xs font-semibold tracking-wide"
         >
           <Shield className="w-3.5 h-3.5 text-sky-400" />
-          Production-Quality Enterprise Multi-Agent System
+          SentinelCX · Enterprise Multi-Agent System
         </motion.div>
 
         <motion.h1

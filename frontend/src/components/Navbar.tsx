@@ -49,7 +49,7 @@ export const Navbar: React.FC<NavbarProps> = ({
           <div>
             <div className="flex items-center space-x-2">
               <span className="font-bold text-base tracking-tight text-white group-hover:text-sky-400 transition-colors">
-                SUPPORTSHIELD <span className="text-sky-400 font-extrabold">AI</span>
+                SENTINEL<span className="text-sky-400 font-extrabold">CX</span>
               </span>
               <span className="text-[10px] px-2 py-0.5 rounded-full bg-sky-950 border border-sky-800/60 text-sky-300 font-mono">
                 v2.0

@@ -56,7 +56,7 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
     {
       id: 'welcome_1',
       sender: 'assistant',
-      content: 'Namaste! Welcome to Enterprise Support. How can I assist you with your orders, refunds, billing, or account today?',
+      content: 'Namaste! Welcome to SentinelCX. How can I assist you with your orders, refunds, billing, or account today?',
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       action: 'answer',
       language: 'en',
@@ -234,7 +234,7 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
             </div>
             <div>
               <div className="flex items-center space-x-2">
-                <h2 className="text-sm font-bold text-white">Enterprise AI Support</h2>
+                <h2 className="text-sm font-bold text-white">SentinelCX</h2>
                 <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-950 border border-emerald-800 text-emerald-300 font-mono flex items-center gap-1">
                   <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
                   Active

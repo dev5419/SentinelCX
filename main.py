@@ -9,7 +9,7 @@ from ui import (
 
 
 st.set_page_config(
-    page_title="Enterprise AI Customer Support & Supervision",
+    page_title="SentinelCX — Enterprise AI Customer Support & Supervision",
     page_icon="🛡️",
     layout="wide",
     initial_sidebar_state="expanded"
