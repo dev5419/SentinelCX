@@ -51,8 +51,8 @@ export const SupervisorCommandCenterView: React.FC<SupervisorCommandCenterViewPr
   const [decisionNotes, setDecisionNotes] = useState('');
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
-  // Filter state for approvals & tickets
-  const [approvalTab, setApprovalTab] = useState<'all' | 'pending' | 'approved' | 'rejected'>('all');
+  // Completed decisions live in history, separate from the pending queue.
+  const [historyTab, setHistoryTab] = useState<'approved' | 'rejected'>('approved');
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [priorityFilter, setPriorityFilter] = useState<string>('all');
 
@@ -143,6 +143,7 @@ export const SupervisorCommandCenterView: React.FC<SupervisorCommandCenterViewPr
         'sup_vikram_204',
         resolvedNotes
       );
+      await loadData();
       onRefreshMetrics();
     } catch (e: any) {
       console.error('Failed to submit approval decision:', e);
@@ -160,13 +161,16 @@ export const SupervisorCommandCenterView: React.FC<SupervisorCommandCenterViewPr
     if (priorityFilter !== 'all' && t.priority !== priorityFilter) return false;
     return true;
   });
+  const completedApprovals = approvals.filter((a) => a.status === historyTab);
+  const approvedApprovalsCount = approvals.filter((a) => a.status === 'approved').length;
+  const rejectedApprovalsCount = approvals.filter((a) => a.status === 'rejected').length;
 
   // Chart data with Ember Studio color palette
   const priorityChartData = [
-    { name: 'Critical', value: metrics?.priority_distribution?.Critical || 1, color: '#DC2626' },
-    { name: 'High', value: metrics?.priority_distribution?.High || 2, color: '#D97706' },
-    { name: 'Medium', value: metrics?.priority_distribution?.Medium || 3, color: '#C2410C' },
-    { name: 'Low', value: metrics?.priority_distribution?.Low || 1, color: '#16A34A' }
+    { name: 'Critical', value: metrics?.priority_distribution?.Critical ?? 0, color: '#DC2626' },
+    { name: 'High', value: metrics?.priority_distribution?.High ?? 0, color: '#D97706' },
+    { name: 'Medium', value: metrics?.priority_distribution?.Medium ?? 0, color: '#C2410C' },
+    { name: 'Low', value: metrics?.priority_distribution?.Low ?? 0, color: '#16A34A' }
   ];
 
   return (
@@ -212,18 +216,7 @@ export const SupervisorCommandCenterView: React.FC<SupervisorCommandCenterViewPr
         const pendingApprovalsCount = approvals.filter(
           (a) => (a.status || 'pending') === 'pending'
         ).length;
-        const approvedApprovalsCount = approvals.filter(
-          (a) => a.status === 'approved'
-        ).length;
-        const rejectedApprovalsCount = approvals.filter(
-          (a) => a.status === 'rejected'
-        ).length;
-
-        const filteredApprovals = approvals.filter((a) => {
-          const s = a.status || 'pending';
-          if (approvalTab === 'all') return true;
-          return s === approvalTab;
-        });
+        const filteredApprovals = approvals.filter((a) => (a.status || 'pending') === 'pending');
 
         return (
           <>
@@ -288,62 +281,16 @@ export const SupervisorCommandCenterView: React.FC<SupervisorCommandCenterViewPr
                   </span>
                 </div>
 
-                {/* Status Tabs: All, Pending, Approved, Rejected */}
-                <div className="flex items-center space-x-1 p-1 rounded-lg bg-[#E7E5E4] border border-[#D6D3D1] text-xs flex-wrap gap-y-1">
-                  <button
-                    onClick={() => setApprovalTab('all')}
-                    className={`px-3 py-1 rounded-md font-semibold transition-all cursor-pointer ${
-                      approvalTab === 'all'
-                        ? 'bg-[#C2410C] text-white shadow-xs'
-                        : 'text-[#57534E] hover:text-[#1C1917]'
-                    }`}
-                  >
-                    All ({approvals.length})
-                  </button>
-                  <button
-                    onClick={() => setApprovalTab('pending')}
-                    className={`px-3 py-1 rounded-md font-semibold transition-all flex items-center gap-1.5 cursor-pointer ${
-                      approvalTab === 'pending'
-                        ? 'bg-[#D97706] text-white shadow-xs'
-                        : 'text-[#D97706] hover:text-[#B45309]'
-                    }`}
-                  >
-                    <span className="w-2 h-2 rounded-full bg-white animate-pulse" />
-                    Pending ({pendingApprovalsCount})
-                  </button>
-                  <button
-                    onClick={() => setApprovalTab('approved')}
-                    className={`px-3 py-1 rounded-md font-semibold transition-all flex items-center gap-1.5 cursor-pointer ${
-                      approvalTab === 'approved'
-                        ? 'bg-[#16A34A] text-white shadow-xs'
-                        : 'text-[#16A34A] hover:text-[#15803D]'
-                    }`}
-                  >
-                    <CheckCircle2 className="w-3.5 h-3.5" />
-                    Approved ({approvedApprovalsCount})
-                  </button>
-                  <button
-                    onClick={() => setApprovalTab('rejected')}
-                    className={`px-3 py-1 rounded-md font-semibold transition-all flex items-center gap-1.5 cursor-pointer ${
-                      approvalTab === 'rejected'
-                        ? 'bg-[#DC2626] text-white shadow-xs'
-                        : 'text-[#DC2626] hover:text-[#B91C1C]'
-                    }`}
-                  >
-                    <XCircle className="w-3.5 h-3.5" />
-                    Rejected ({rejectedApprovalsCount})
-                  </button>
-                </div>
               </div>
 
               {filteredApprovals.length === 0 ? (
                 <div className="p-8 text-center rounded-xl bg-white border border-[#D6D3D1] text-[#78716C] text-xs">
                   <CheckCircle2 className="w-8 h-8 text-[#16A34A] mx-auto mb-2 opacity-80" />
                   <p className="font-semibold text-[#1C1917]">
-                    No {approvalTab !== 'all' ? approvalTab : ''} requests found in queue.
+                    No pending requests in the approval queue.
                   </p>
                   <p className="text-[11px] text-[#78716C] mt-1">
-                    Select another status tab or escalate a problem in the Chatbot to test live supervision.
+                    Completed decisions are available in Approved &amp; Rejected Actions below.
                   </p>
                 </div>
               ) : (
@@ -530,6 +477,7 @@ export const SupervisorCommandCenterView: React.FC<SupervisorCommandCenterViewPr
                 <option value="all">All Statuses</option>
                 <option value="pending_approval">Pending Approval</option>
                 <option value="resolved">Resolved</option>
+                <option value="rejected">Rejected</option>
                 <option value="escalated">Escalated</option>
                 <option value="open">Open</option>
               </select>
@@ -589,47 +537,107 @@ export const SupervisorCommandCenterView: React.FC<SupervisorCommandCenterViewPr
         </div>
 
         {/* Priority Analytics Chart (1 col) */}
-        <div className="bg-[#F5F5F4] p-5 rounded-xl border border-[#D6D3D1] shadow-xs flex flex-col justify-between">
-          <h2 className="font-bold text-[#1C1917] text-base mb-2 font-display">Priority Distribution</h2>
-          <div className="h-48 w-full">
-            <ResponsiveContainer width="100%" height="100%">
-              <PieChart>
-                <Pie
-                  data={priorityChartData}
-                  cx="50%"
-                  cy="50%"
-                  innerRadius={50}
-                  outerRadius={75}
-                  paddingAngle={5}
-                  dataKey="value"
-                >
-                  {priorityChartData.map((entry, index) => (
-                    <Cell key={`cell-${index}`} fill={entry.color} />
-                  ))}
-                </Pie>
-                <Tooltip
-                  contentStyle={{
-                    backgroundColor: '#FFFFFF',
-                    borderColor: '#D6D3D1',
-                    borderRadius: '8px',
-                    fontSize: '11px',
-                    color: '#1C1917',
-                    boxShadow: '0 4px 16px rgba(28,25,23,0.06)'
-                  }}
-                />
-              </PieChart>
-            </ResponsiveContainer>
-          </div>
-          <div className="grid grid-cols-2 gap-2 text-[10px] font-mono mt-2">
-            {priorityChartData.map((p) => (
-              <div key={p.name} className="flex items-center space-x-1.5 text-[#57534E]">
-                <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: p.color }} />
-                <span>{p.name}: {p.value}</span>
-              </div>
-            ))}
+        <div className="bg-[#F5F5F4] p-4 rounded-xl border border-[#D6D3D1] shadow-xs self-start min-w-0">
+          <h2 className="font-bold text-[#1C1917] text-base mb-3 font-display">Priority Distribution</h2>
+          <div className="flex items-center gap-4">
+            <div className="h-32 w-32 shrink-0">
+              <ResponsiveContainer width="100%" height="100%">
+                <PieChart>
+                  <Pie
+                    data={priorityChartData}
+                    cx="50%"
+                    cy="50%"
+                    innerRadius={40}
+                    outerRadius={56}
+                    paddingAngle={5}
+                    dataKey="value"
+                  >
+                    {priorityChartData.map((entry, index) => (
+                      <Cell key={`cell-${index}`} fill={entry.color} />
+                    ))}
+                  </Pie>
+                  <Tooltip
+                    contentStyle={{
+                      backgroundColor: '#FFFFFF',
+                      borderColor: '#D6D3D1',
+                      borderRadius: '8px',
+                      fontSize: '11px',
+                      color: '#1C1917',
+                      boxShadow: '0 4px 16px rgba(28,25,23,0.06)'
+                    }}
+                  />
+                </PieChart>
+              </ResponsiveContainer>
+            </div>
+            <div className="flex-1 space-y-2 text-[11px] font-mono">
+              {priorityChartData.map((p) => (
+                <div key={p.name} className="flex items-center space-x-1.5 text-[#57534E]">
+                  <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: p.color }} />
+                  <span>{p.name}: {p.value}</span>
+                </div>
+              ))}
+            </div>
           </div>
         </div>
       </div>
+
+      <section aria-label="Completed Human Actions" className="bg-[#F5F5F4] p-5 rounded-xl border border-[#D6D3D1] shadow-xs">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
+          <h2 className="font-bold text-[#1C1917] text-base font-display">Approved &amp; Rejected Actions</h2>
+          <div className="flex items-center gap-1 p-1 rounded-lg bg-[#E7E5E4] border border-[#D6D3D1] text-xs">
+            <button
+              onClick={() => setHistoryTab('approved')}
+              aria-pressed={historyTab === 'approved'}
+              className={`px-3 py-1 rounded-md font-semibold cursor-pointer ${historyTab === 'approved' ? 'bg-[#16A34A] text-white shadow-xs' : 'text-[#16A34A]'}`}
+            >
+              Approved ({approvedApprovalsCount})
+            </button>
+            <button
+              onClick={() => setHistoryTab('rejected')}
+              aria-pressed={historyTab === 'rejected'}
+              className={`px-3 py-1 rounded-md font-semibold cursor-pointer ${historyTab === 'rejected' ? 'bg-[#DC2626] text-white shadow-xs' : 'text-[#DC2626]'}`}
+            >
+              Rejected ({rejectedApprovalsCount})
+            </button>
+          </div>
+        </div>
+        {completedApprovals.length === 0 ? (
+          <p className="text-xs text-[#78716C] p-4 bg-white rounded-lg border border-[#D6D3D1]">No {historyTab} actions yet.</p>
+        ) : (
+          <div className="overflow-x-auto bg-white border border-[#D6D3D1] rounded-lg">
+            <table className="w-full text-left text-xs">
+              <thead className="border-b border-[#D6D3D1] bg-[#F5F5F4] text-[10px] uppercase font-bold text-[#78716C]">
+                <tr>
+                  <th className="py-2.5 px-3">Request / Order</th>
+                  <th className="py-2.5 px-3">Customer</th>
+                  <th className="py-2.5 px-3">Decision Notes</th>
+                  <th className="py-2.5 px-3">Status</th>
+                  <th className="py-2.5 px-3">Details</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-[#D6D3D1]">
+                {completedApprovals.map((approval) => (
+                  <tr key={approval.approval_id || approval.thread_id}>
+                    <td className="py-2.5 px-3 font-mono text-[#57534E]">
+                      {approval.approval_id}<span className="block text-[10px]">{approval.order_id || 'General Support'}</span>
+                    </td>
+                    <td className="py-2.5 px-3 font-semibold text-[#1C1917]">{approval.user_name || approval.user_id}</td>
+                    <td className="py-2.5 px-3 text-[#57534E]">{approval.decision_notes || approval.reason}</td>
+                    <td className={`py-2.5 px-3 font-semibold ${approval.status === 'approved' ? 'text-[#16A34A]' : 'text-[#DC2626]'}`}>
+                      {approval.status?.toUpperCase()}
+                    </td>
+                    <td className="py-2.5 px-3">
+                      <button onClick={() => setSelectedApproval(approval)} className="text-[#C2410C] font-semibold cursor-pointer flex items-center gap-1">
+                        <Eye className="w-3.5 h-3.5" /> View Details
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
 
       {/* SECTION 3: Live PII Redaction Feed & Audit Trail */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">

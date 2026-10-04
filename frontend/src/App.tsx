@@ -17,7 +17,6 @@ import { SafetyProofView } from './views/SafetyProofView';
 export function App() {
   const [currentTab, setCurrentTab] = useState<'landing' | 'portal' | 'supervisor' | 'safety'>('landing');
   const [visitedTabs, setVisitedTabs] = useState(() => new Set([currentTab]));
-  const [users, setUsers] = useState<UserProfile[]>([]);
   const [selectedUser, setSelectedUser] = useState<UserProfile | null>(null);
   const [metrics, setMetrics] = useState<MetricsSummary | null>(null);
   const [pendingApprovalsCount, setPendingApprovalsCount] = useState<number>(0);
@@ -38,15 +37,10 @@ export function App() {
       const [usersData, metricsData, approvalsData] = await Promise.all([
         fetchDemoUsers(),
         fetchMetrics(),
-        fetchApprovals()
+        fetchApprovals('pending')
       ]);
 
-      // Hide Alice Johnson, Bob Smith, and Charlie Davis from the profile selector.
-      const selectableUsers = usersData.filter((user) => !['user_1', 'user_2', 'user_3'].includes(user.user_id));
-      setUsers(selectableUsers);
-      setSelectedUser((prev) =>
-        prev && selectableUsers.some((user) => user.user_id === prev.user_id) ? prev : selectableUsers[0] || null
-      );
+      setSelectedUser((prev) => prev || usersData.find((user) => user.user_id === 'user_1') || usersData[0] || null);
       setMetrics(metricsData);
       setPendingApprovalsCount(approvalsData.length);
     } catch (e) {
@@ -80,9 +74,6 @@ export function App() {
       <Navbar
         currentTab={currentTab}
         setCurrentTab={handleTabChange}
-        users={users}
-        selectedUser={selectedUser}
-        onSelectUser={setSelectedUser}
         pendingApprovalsCount={pendingApprovalsCount}
         onResetDemo={handleResetDemo}
         isResetting={isResetting}

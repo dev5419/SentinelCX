@@ -4,17 +4,12 @@ import {
   Activity,
   Layers,
   RotateCcw,
-  User,
   Users
 } from 'lucide-react';
-import { UserProfile } from '../api/client';
 
 interface NavbarProps {
   currentTab: 'landing' | 'portal' | 'supervisor' | 'safety';
   setCurrentTab: (tab: 'landing' | 'portal' | 'supervisor' | 'safety') => void;
-  users: UserProfile[];
-  selectedUser: UserProfile | null;
-  onSelectUser: (user: UserProfile) => void;
   pendingApprovalsCount: number;
   onResetDemo: () => void;
   isResetting: boolean;
@@ -24,9 +19,6 @@ interface NavbarProps {
 export const Navbar: React.FC<NavbarProps> = ({
   currentTab,
   setCurrentTab,
-  users,
-  selectedUser,
-  onSelectUser,
   pendingApprovalsCount,
   onResetDemo,
   isResetting,
@@ -116,28 +108,8 @@ export const Navbar: React.FC<NavbarProps> = ({
           </button>
         </nav>
 
-        {/* Right Tools: User Switcher, Reset Demo, Backend Status */}
+        {/* Right Tools: Reset Demo, Backend Status */}
         <div className="flex items-center space-x-3">
-          {/* Demo User Switcher Dropdown */}
-          <div className="flex items-center space-x-2 bg-[#F5F5F4] px-3 py-1.5 rounded-lg border border-[#D6D3D1] text-xs shadow-xs">
-            <User className="w-3.5 h-3.5 text-[#C2410C]" />
-            <select
-              aria-label="Select demo user profile"
-              className="bg-transparent text-[#1C1917] text-xs font-medium focus:outline-none cursor-pointer"
-              value={selectedUser?.user_id || 'user_1'}
-              onChange={(e) => {
-                const found = users.find((u) => u.user_id === e.target.value);
-                if (found) onSelectUser(found);
-              }}
-            >
-              {users.map((u) => (
-                <option key={u.user_id} value={u.user_id} className="bg-[#F5F5F4] text-[#1C1917]">
-                  {u.name} ({u.is_verified ? 'Verified' : 'Unverified'})
-                </option>
-              ))}
-            </select>
-          </div>
-
           {/* Reset Demo Button */}
           <button
             onClick={onResetDemo}
