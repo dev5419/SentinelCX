@@ -1,31 +1,20 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Users,
   CheckCircle2,
   XCircle,
   AlertTriangle,
-  Clock,
-  ShieldCheck,
-  Search,
-  Filter,
-  FileText,
-  DollarSign,
-  TrendingUp,
+  RefreshCw,
   Lock,
-  ArrowUpRight,
   Eye,
-  RefreshCw
+  FileText
 } from 'lucide-react';
 import {
   PieChart,
   Pie,
   Cell,
   ResponsiveContainer,
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
   Tooltip
 } from 'recharts';
 import {
@@ -55,7 +44,6 @@ export const SupervisorCommandCenterView: React.FC<SupervisorCommandCenterViewPr
   const [approvals, setApprovals] = useState<PendingApproval[]>([]);
   const [auditLogs, setAuditLogs] = useState<AuditRecord[]>([]);
   const [piiFeed, setPiiFeed] = useState<PiiFeedItem[]>([]);
-  const [loading, setLoading] = useState(true);
 
   // Selected Approval Drawer state
   const [selectedApproval, setSelectedApproval] = useState<PendingApproval | null>(null);
@@ -67,7 +55,7 @@ export const SupervisorCommandCenterView: React.FC<SupervisorCommandCenterViewPr
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [priorityFilter, setPriorityFilter] = useState<string>('all');
 
-  const loadData = async () => {
+  const loadData = useCallback(async () => {
     try {
       const [tData, aData, logs, pii] = await Promise.all([
         fetchTickets(),
@@ -81,16 +69,14 @@ export const SupervisorCommandCenterView: React.FC<SupervisorCommandCenterViewPr
       setPiiFeed(pii);
     } catch (e) {
       console.error('Failed to load command center data:', e);
-    } finally {
-      setLoading(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
     loadData();
     const interval = setInterval(loadData, 5000);
     return () => clearInterval(interval);
-  }, []);
+  }, [loadData]);
 
   const handleDecision = async (decision: 'approved' | 'rejected') => {
     if (!selectedApproval) return;

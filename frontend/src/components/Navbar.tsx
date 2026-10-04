@@ -4,9 +4,6 @@ import {
   Activity,
   Layers,
   RotateCcw,
-  CheckCircle,
-  AlertCircle,
-  HelpCircle,
   User,
   Users
 } from 'lucide-react';

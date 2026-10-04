@@ -250,10 +250,20 @@ def test_injection_subtle_system_impersonation():
 
 def test_injection_negative_benign_customer_query():
     """Legitimate customer queries must NOT be blocked."""
-    q = "Can you please check the return policy for my order ORD-1001?"
-    res = check_injection(q)
-    assert res["is_injection"] is False
-    assert res["reason_code"] == "SAFE"
+    q1 = "Can you please check the return policy for my order ORD-1001?"
+    res1 = check_injection(q1)
+    assert res1["is_injection"] is False
+    assert res1["reason_code"] == "SAFE"
+
+    q2 = "Can someone please approve my refund for order ORD-1001?"
+    res2 = check_injection(q2)
+    assert res2["is_injection"] is False
+    assert res2["reason_code"] == "SAFE"
+
+    q3 = "Mera refund approve karo please, item kharab aya hai"
+    res3 = check_injection(q3)
+    assert res3["is_injection"] is False
+    assert res3["reason_code"] == "SAFE"
 
 
 # =====================================================================
@@ -321,18 +331,31 @@ def test_hinglish_rag_reply_style_instruction():
     """Verify RAG prompt includes Hinglish conversational instruction."""
     state = {
         "user_query": "Bhai mera refund kab aayega?",
-        "intent": "refunds",
+        "intent": "refund_request",
         "intent_confidence": 0.9,
         "language": "hinglish",
         "query_en": "When will my refund arrive?"
     }
 
-    with patch("agents.rag_agent.LLM") as mock_llm:
+    mock_doc = MagicMock()
+    mock_doc.page_content = (
+        "Refunds are processed within 5-7 business days to the original payment method after approval. "
+        "For credit card transactions, please allow an additional 2-3 business days for your banking institution "
+        "to reflect the updated balance on your statement. Orders cancelled before shipment are refunded immediately. "
+        "Contact customer support if your refund has not appeared after 10 full business days."
+    )
+    mock_doc.metadata = {"source": "returns.md", "title": "Return Policy", "category": "returns"}
+
+    with patch("agents.rag_agent.get_retriever") as mock_get_ret, \
+         patch("agents.rag_agent.retriever") as mock_ret, \
+         patch("agents.rag_agent.LLM") as mock_llm, \
+         patch("agents.rag_agent.is_grounded", return_value=True):
+        mock_ret.invoke.return_value = [mock_doc]
+        mock_get_ret.return_value.invoke.return_value = [mock_doc]
         mock_llm.invoke.return_value = make_mock_llm_response("Aapka refund 5-7 din me credit ho jayega.")
-        with patch("agents.rag_agent.is_grounded", return_value=True):
-            res = rag_agent(state)
-            assert res["language"] == "hinglish"
-            assert "Aapka refund" in res["answer"]
+        res = rag_agent(state)
+        assert res["language"] == "hinglish"
+        assert "Aapka refund" in res["answer"]
 
 
 # =====================================================================

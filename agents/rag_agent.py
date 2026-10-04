@@ -76,7 +76,8 @@ def rag_agent(state):
         return {
             "retrieved_docs": [],
             "answer": fallback_msg,
-            "force_escalate": True
+            "force_escalate": True,
+            "language": language
         }
 
     prompt = f"""
@@ -113,7 +114,8 @@ def rag_agent(state):
         return {
             "retrieved_docs": [],
             "answer": ungrounded_msg,
-            "force_escalate": True
+            "force_escalate": True,
+            "language": language
         }
 
     return {

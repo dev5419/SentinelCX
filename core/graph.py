@@ -516,8 +516,8 @@ def rag_node(state: SupportState) -> Dict[str, Any]:
     intent = state.get("intent", "unknown")
     intent_confidence = state.get("intent_confidence", 0.0)
 
-    # If intent == "unknown" and confidence is low, route to clarify
-    if intent == "unknown" and intent_confidence < 0.6:
+    # If intent is unknown or confidence is low, route to clarify
+    if intent == "unknown" or intent_confidence < 0.6:
         clarify_msg = (
             "Kripya apni query thoda aur detail me batayein taaki hum aapki behtar madad kar sakein."
             if lang == "hinglish" else
@@ -530,7 +530,7 @@ def rag_node(state: SupportState) -> Dict[str, Any]:
             "action": "clarify",
             "trace": [{
                 "node": "rag",
-                "summary": "Low confidence unknown query, requesting clarification",
+                "summary": "Unknown or low confidence query, requesting clarification",
                 "duration_ms": dur
             }]
         }
@@ -550,18 +550,48 @@ def rag_node(state: SupportState) -> Dict[str, Any]:
 
     # Retrieve with relevance scores and build structured citations
     results = retrieve_with_scores(query_en, category=retrieval_cat, k=4)
+    # Filter out completely irrelevant / negative relevance score chunks (< 0.10)
+    filtered_results = [(d, s) for d, s in results if (isinstance(s, (int, float)) and s >= 0.10)]
     docs = []
     citations = []
-    seen_keys = set()
-    for doc, score in results:
+    seen_sources = set()
+    for doc, score in filtered_results:
+        docs.append(doc)
         cit = build_citation(doc, score)
         key = cit.get("source") or (cit.get("title"), cit.get("category"))
-        if key not in seen_keys:
-            seen_keys.add(key)
+        if key not in seen_sources:
+            seen_sources.add(key)
             citations.append(cit)
-            docs.append(doc)
 
     context = "\n\n".join(d.page_content for d in docs)
+
+    # If no relevant documentation was found, escalate safely
+    if not docs or len(context.strip()) < 50:
+        dossier = generate_handoff_dossier(
+            state=state,
+            issue_summary="Inquiry could not be factually grounded in knowledge base documentation (no relevant articles found)",
+            proposed_action="Route to human support specialist for unverified inquiry"
+        )
+        escalate_msg = (
+            "Dokumentation ke anusaar hum is vishay par nishchit jankari uplabdh nahi kara sakte. Hum aapko human support specialist ko transfer kar rahe hain."
+            if lang == "hinglish" else
+            "I could not verify a reliable answer from our knowledge base for this inquiry. I have escalated your request to a human support specialist."
+        )
+        dur = round((time.perf_counter() - t0) * 1000, 2)
+        return {
+            "retrieved_docs": [],
+            "answer": escalate_msg,
+            "context": "",
+            "grounded": False,
+            "action": "escalate",
+            "force_escalate": True,
+            "handoff_dossier": dossier,
+            "trace": [{
+                "node": "rag",
+                "summary": "No relevant documentation found in knowledge base (relevance score < 0.10)",
+                "duration_ms": dur
+            }]
+        }
 
     history = state.get("history", [])
     history_context = ""
@@ -616,8 +646,25 @@ def grounding_node(state: SupportState) -> Dict[str, Any]:
     lang = state.get("language", "en")
     query = state.get("sanitized_query") or state.get("user_query", "")
 
-    # 1. First-pass grounding check
-    first_grounded = is_grounded(ans, context) if (context and ans) else False
+    refusal_keywords = [
+        "not have enough verified information",
+        "unable to find any information",
+        "unable to find information",
+        "unable to find an answer",
+        "could not find any information",
+        "cannot answer based on",
+        "cannot be answered from",
+        "context does not contain",
+        "does not contain information",
+        "no information in the provided",
+        "no information regarding",
+        "not mentioned in the provided",
+        "not available in our documentation",
+    ]
+    is_refusal = any(k in ans.lower() for k in refusal_keywords) or len(ans.strip()) < 10
+
+    # 1. First-pass grounding check (refusals fail grounding to trigger escalation)
+    first_grounded = False if is_refusal else (is_grounded(ans, context) if (context and ans) else False)
 
     if first_grounded:
         dur = round((time.perf_counter() - t0) * 1000, 2)
@@ -851,10 +898,10 @@ def build_graph(checkpointer: Optional[Any] = None):
     builder.add_edge("auto_execute", "respond")
     builder.add_edge("hitl_interrupt", "respond")
 
-    # 5. RAG branch: clarify -> respond, else grounding -> respond
+    # 5. RAG branch: clarify/escalate -> respond, else grounding -> respond
     builder.add_conditional_edges(
         "rag",
-        lambda s: "respond" if s.get("action") == "clarify" else "grounding",
+        lambda s: "respond" if s.get("action") in ["clarify", "escalate"] else "grounding",
         {
             "respond": "respond",
             "grounding": "grounding"

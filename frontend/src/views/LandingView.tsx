@@ -2,16 +2,12 @@ import React from 'react';
 import { motion } from 'framer-motion';
 import {
   Shield,
-  Layers,
   Activity,
   Lock,
   Cpu,
-  Database,
   CheckCircle2,
-  AlertTriangle,
   ArrowRight,
   TrendingUp,
-  FileText,
   UserCheck,
   Zap
 } from 'lucide-react';
