@@ -16,12 +16,19 @@ import { SafetyProofView } from './views/SafetyProofView';
 
 export function App() {
   const [currentTab, setCurrentTab] = useState<'landing' | 'portal' | 'supervisor' | 'safety'>('landing');
+  const [visitedTabs, setVisitedTabs] = useState(() => new Set([currentTab]));
   const [users, setUsers] = useState<UserProfile[]>([]);
   const [selectedUser, setSelectedUser] = useState<UserProfile | null>(null);
   const [metrics, setMetrics] = useState<MetricsSummary | null>(null);
   const [pendingApprovalsCount, setPendingApprovalsCount] = useState<number>(0);
   const [backendOnline, setBackendOnline] = useState<boolean>(false);
   const [isResetting, setIsResetting] = useState<boolean>(false);
+
+  // Keep visited views mounted so navigation preserves state and in-flight work.
+  const handleTabChange = (tab: typeof currentTab) => {
+    setVisitedTabs((prev) => prev.has(tab) ? prev : new Set([...prev, tab]));
+    setCurrentTab(tab);
+  };
 
   const refreshSystemData = useCallback(async () => {
     try {
@@ -34,8 +41,12 @@ export function App() {
         fetchApprovals()
       ]);
 
-      setUsers(usersData);
-      setSelectedUser((prev) => prev || (usersData.length > 0 ? usersData[0] : null));
+      // Hide Alice Johnson, Bob Smith, and Charlie Davis from the profile selector.
+      const selectableUsers = usersData.filter((user) => !['user_1', 'user_2', 'user_3'].includes(user.user_id));
+      setUsers(selectableUsers);
+      setSelectedUser((prev) =>
+        prev && selectableUsers.some((user) => user.user_id === prev.user_id) ? prev : selectableUsers[0] || null
+      );
       setMetrics(metricsData);
       setPendingApprovalsCount(approvalsData.length);
     } catch (e) {
@@ -68,7 +79,7 @@ export function App() {
       {/* Top Navigation */}
       <Navbar
         currentTab={currentTab}
-        setCurrentTab={setCurrentTab}
+        setCurrentTab={handleTabChange}
         users={users}
         selectedUser={selectedUser}
         onSelectUser={setSelectedUser}
@@ -80,35 +91,43 @@ export function App() {
 
       {/* Main Content View */}
       <main className="flex-1 max-w-7xl w-full mx-auto p-4 md:p-6">
-        {currentTab === 'landing' && (
-          <LandingView
-            metrics={metrics}
-            onLaunchDemo={() => setCurrentTab('portal')}
-            onOpenCommandCenter={() => setCurrentTab('supervisor')}
-            onOpenSafetyProof={() => setCurrentTab('safety')}
-          />
-        )}
+        <div hidden={currentTab !== 'landing'}>
+          {visitedTabs.has('landing') && (
+            <LandingView
+              metrics={metrics}
+              onLaunchDemo={() => handleTabChange('portal')}
+              onOpenCommandCenter={() => handleTabChange('supervisor')}
+              onOpenSafetyProof={() => handleTabChange('safety')}
+            />
+          )}
+        </div>
 
-        {currentTab === 'portal' && (
-          <CustomerPortalView
-            currentUser={selectedUser}
-            onNavigateToSupervisor={() => setCurrentTab('supervisor')}
-          />
-        )}
+        <div hidden={currentTab !== 'portal'}>
+          {visitedTabs.has('portal') && (
+            <CustomerPortalView
+              currentUser={selectedUser}
+              onNavigateToSupervisor={() => handleTabChange('supervisor')}
+            />
+          )}
+        </div>
 
-        {currentTab === 'supervisor' && (
-          <SupervisorCommandCenterView
-            metrics={metrics}
-            onRefreshMetrics={refreshSystemData}
-          />
-        )}
+        <div hidden={currentTab !== 'supervisor'}>
+          {visitedTabs.has('supervisor') && (
+            <SupervisorCommandCenterView
+              metrics={metrics}
+              onRefreshMetrics={refreshSystemData}
+            />
+          )}
+        </div>
 
-        {currentTab === 'safety' && (
-          <SafetyProofView
-            metrics={metrics}
-            onRefreshMetrics={refreshSystemData}
-          />
-        )}
+        <div hidden={currentTab !== 'safety'}>
+          {visitedTabs.has('safety') && (
+            <SafetyProofView
+              metrics={metrics}
+              onRefreshMetrics={refreshSystemData}
+            />
+          )}
+        </div>
       </main>
     </div>
   );

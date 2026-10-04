@@ -122,13 +122,25 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
           if (eventType === 'node_start') {
             setActiveNode(data.node);
           } else if (eventType === 'node_complete') {
+            setActiveNode(null);
             setCompletedNodes((prev) => new Set([...prev, data.node]));
-            if (data.trace_step) {
-              setCurrentTrace((prev) => [...prev, data.trace_step]);
-            }
-          } else if (eventType === 'chat_complete') {
+            setCurrentTrace((prev) => [...prev, {
+              node: data.node,
+              summary: data.summary,
+              duration_ms: data.duration_ms,
+              timestamp: data.timestamp,
+            }]);
+          } else if (eventType === 'interrupt') {
+            setActiveNode('hitl_interrupt');
+          } else if (eventType === 'complete') {
             setIsProcessing(false);
             setActiveNode(null);
+            setCurrentTrace(data.trace || []);
+            setCompletedNodes((prev) => new Set([
+              ...prev,
+              ...(data.trace || []).map((step: TraceStep) => step.node),
+              ...(data.action === 'hitl_interrupt' ? ['hitl_interrupt'] : []),
+            ]));
 
             const why: WhyDecision | undefined = data.why_decision;
             setCurrentWhyDecision(why);
@@ -137,7 +149,7 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
             const botMsg: Message = {
               id: `bot_${Date.now()}`,
               sender: 'assistant',
-              content: data.final_response || 'No response generated.',
+              content: data.answer || 'No response generated.',
               timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
               action: data.action,
               language: data.language,
@@ -149,7 +161,7 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
               isPendingApproval: data.is_pending_approval
             };
             setMessages((prev) => [...prev, botMsg]);
-          } else if (eventType === 'chat_error') {
+          } else if (eventType === 'error') {
             setIsProcessing(false);
             setActiveNode(null);
             setMessages((prev) => [
@@ -171,6 +183,8 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
               const res = await sendChatTurn(activeThread, query, currentUser?.user_id || 'user_1');
               setCurrentWhyDecision(res.why_decision);
               setIsCurrentPendingApproval(Boolean(res.is_pending_approval));
+              setCurrentTrace(res.trace);
+              setCompletedNodes(new Set(res.trace.map((step) => step.node)));
 
               const botMsg: Message = {
                 id: `bot_${Date.now()}`,
@@ -206,6 +220,13 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
             console.warn('SSE stream interrupted midway:', streamErr);
             setIsProcessing(false);
             setActiveNode(null);
+            setMessages((prev) => [...prev, {
+              id: `err_${Date.now()}`,
+              sender: 'assistant',
+              content: 'The connection was interrupted before a response arrived. Check the Command Center for the request status before retrying.',
+              timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+              action: 'clarify',
+            }]);
           }
         }
       );
@@ -213,6 +234,14 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
     } catch (e: any) {
       console.error('Chat turn initiation error:', e);
       setIsProcessing(false);
+      setActiveNode(null);
+      setMessages((prev) => [...prev, {
+        id: `err_${Date.now()}`,
+        sender: 'assistant',
+        content: `System notification: ${e.message || 'Unable to start chat request'}`,
+        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        action: 'clarify',
+      }]);
     }
   };
 
@@ -224,6 +253,10 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
   };
 
   const handleNewSession = () => {
+    streamCleanupRef.current?.();
+    streamCleanupRef.current = null;
+    setIsProcessing(false);
+    setActiveNode(null);
     const newThread = `thread_${Math.random().toString(36).substring(2, 9)}`;
     setThreadId(newThread);
     setMessages([

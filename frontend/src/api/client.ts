@@ -289,32 +289,43 @@ export function subscribeChatStream(
   });
 
   const eventSource = new EventSource(`${API_BASE_URL}/chat/stream?${params.toString()}`);
+  let closed = false;
 
-  eventSource.addEventListener('start', (e: MessageEvent) => {
-    try { onEvent('start', JSON.parse(e.data)); } catch {}
-  });
-
-  eventSource.addEventListener('node_complete', (e: MessageEvent) => {
-    try { onEvent('node_complete', JSON.parse(e.data)); } catch {}
-  });
-
-  eventSource.addEventListener('interrupt', (e: MessageEvent) => {
-    try { onEvent('interrupt', JSON.parse(e.data)); } catch {}
-  });
-
-  eventSource.addEventListener('complete', (e: MessageEvent) => {
-    try {
-      onEvent('complete', JSON.parse(e.data));
-    } catch {}
-    eventSource.close();
-  });
-
-  eventSource.addEventListener('error', (e: any) => {
-    if (onError) onError(e);
-    eventSource.close();
-  });
-
-  return () => {
+  const close = () => {
+    closed = true;
     eventSource.close();
   };
+
+  const dispatch = (eventType: string, e: MessageEvent, terminal = false) => {
+    if (closed) return;
+    let data;
+    try {
+      data = JSON.parse(e.data);
+    } catch (err) {
+      close();
+      onError?.(err);
+      return;
+    }
+    if (terminal) close();
+    onEvent(eventType, data);
+  };
+
+  for (const eventType of ['start', 'node_start', 'node_complete', 'interrupt']) {
+    eventSource.addEventListener(eventType, (e: MessageEvent) => dispatch(eventType, e));
+  }
+
+  eventSource.addEventListener('complete', (e: MessageEvent) => dispatch('complete', e, true));
+
+  eventSource.addEventListener('error', (e: any) => {
+    if (closed) return;
+    // The API sends errors as SSE messages; transport failures have no data.
+    if (typeof e.data === 'string') {
+      dispatch('error', e, true);
+    } else {
+      close();
+      onError?.(e);
+    }
+  });
+
+  return close;
 }
