@@ -1,95 +1,184 @@
 @import "tailwindcss";
 
-@layer base {
-  :root {
-    --bg-main: #090d16;
-    --bg-card: rgba(15, 23, 42, 0.75);
-    --border-card: rgba(255, 255, 255, 0.08);
-    --accent-blue: #38bdf8;
-    --accent-emerald: #10b981;
-    --accent-purple: #a855f7;
-    --accent-rose: #f43f5e;
-    --accent-amber: #f59e0b;
-  }
+@theme {
+  --font-display: "Playfair Display", Georgia, serif;
+  --font-sans: "Source Sans 3", system-ui, -apple-system, sans-serif;
+  --font-mono: "Fira Code", monospace;
 
-  body {
-    background-color: var(--bg-main);
-    color: #f1f5f9;
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Inter", sans-serif;
-    overflow-x: hidden;
-    margin: 0;
-    padding: 0;
-  }
+  --color-primary: #C2410C;
+  --color-primary-hover: #9A3412;
+  --color-accent: #F59E0B;
+  --color-neutral: #78716C;
+  --color-background: #FAFAF9;
+  --color-surface: #F5F5F4;
+  --color-surface-raised: #E7E5E4;
+  --color-text-primary: #1C1917;
+  --color-text-secondary: #57534E;
+  --color-border: #D6D3D1;
+  --color-success: #16A34A;
+  --color-warning: #D97706;
+  --color-error: #DC2626;
 }
 
-/* Glassmorphism card styles */
-.glass-panel {
-  background: rgba(15, 23, 42, 0.7);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+:root {
+  --color-primary: #C2410C;
+  --color-primary-hover: #9A3412;
+  --color-accent: #F59E0B;
+  --color-neutral: #78716C;
+  --color-background: #FAFAF9;
+  --color-surface: #F5F5F4;
+  --color-surface-raised: #E7E5E4;
+  --color-text-primary: #1C1917;
+  --color-text-secondary: #57534E;
+  --color-border: #D6D3D1;
+  --color-success: #16A34A;
+  --color-warning: #D97706;
+  --color-error: #DC2626;
 }
 
-.glass-panel-hover {
-  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+/* Base Ember Studio Typography & Canvas */
+body {
+  background-color: #FAFAF9;
+  color: #1C1917;
+  font-family: "Source Sans 3", system-ui, -apple-system, sans-serif;
+  overflow-x: hidden;
+  margin: 0;
+  padding: 0;
 }
-.glass-panel-hover:hover {
-  border-color: rgba(56, 189, 248, 0.3);
-  box-shadow: 0 10px 40px -10px rgba(56, 189, 248, 0.2);
+
+h1, h2, h3, .font-display {
+  font-family: "Playfair Display", Georgia, serif;
+  letter-spacing: -0.02em;
+}
+
+code, pre, .font-mono {
+  font-family: "Fira Code", monospace;
+  font-feature-settings: "liga" 1, "calt" 1;
+}
+
+/* Ember Studio Card Styles */
+.glass-panel, .ember-card {
+  background-color: #F5F5F4;
+  border: 1px solid #D6D3D1;
+  border-radius: 12px;
+  box-shadow: 0 1px 3px rgba(28, 25, 23, 0.04);
+  transition: all 0.15s ease-in-out;
+}
+
+.glass-panel-hover:hover, .ember-card-hover:hover {
+  box-shadow: 0 4px 16px rgba(28, 25, 23, 0.06);
   transform: translateY(-2px);
+  border-color: #C2410C;
 }
 
-/* Glow effects */
-.glow-blue {
-  box-shadow: 0 0 25px -5px rgba(56, 189, 248, 0.4);
+/* Ember Studio Buttons */
+.ember-btn-primary {
+  background-color: #C2410C;
+  color: #FFFFFF;
+  border-radius: 8px;
+  font-weight: 600;
+  transition: all 150ms ease;
+  box-shadow: 0 1px 2px rgba(194, 65, 12, 0.15);
 }
-.glow-emerald {
-  box-shadow: 0 0 25px -5px rgba(16, 185, 129, 0.4);
-}
-.glow-purple {
-  box-shadow: 0 0 25px -5px rgba(168, 85, 247, 0.4);
-}
-.glow-rose {
-  box-shadow: 0 0 25px -5px rgba(244, 63, 94, 0.4);
+.ember-btn-primary:hover {
+  background-color: #9A3412;
+  box-shadow: 0 4px 12px rgba(194, 65, 12, 0.25);
 }
 
-/* Custom Sleek Scrollbar */
+.ember-btn-secondary {
+  background-color: transparent;
+  border: 1px solid #D6D3D1;
+  color: #1C1917;
+  border-radius: 8px;
+  font-weight: 600;
+  transition: all 150ms ease;
+}
+.ember-btn-secondary:hover {
+  background-color: #E7E5E4;
+}
+
+.ember-btn-ghost {
+  background-color: transparent;
+  color: #57534E;
+  border-radius: 8px;
+  font-weight: 500;
+  transition: all 150ms ease;
+}
+.ember-btn-ghost:hover {
+  background-color: #E7E5E4;
+  color: #1C1917;
+}
+
+.ember-btn-destructive {
+  background-color: #DC2626;
+  color: #FFFFFF;
+  border-radius: 8px;
+  font-weight: 600;
+  transition: all 150ms ease;
+}
+.ember-btn-destructive:hover {
+  background-color: #B91C1C;
+}
+
+/* Ember Studio Inputs */
+input, textarea, select {
+  font-family: "Source Sans 3", sans-serif;
+  transition: all 150ms ease;
+}
+
+input:focus, textarea:focus, select:focus {
+  outline: none;
+  border-color: #C2410C !important;
+  box-shadow: 0 0 0 3px rgba(194, 65, 12, 0.12) !important;
+}
+
+/* Warm Scrollbar */
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
 }
 ::-webkit-scrollbar-track {
-  background: rgba(15, 23, 42, 0.6);
+  background: #FAFAF9;
 }
 ::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.15);
+  background: #D6D3D1;
   border-radius: 9999px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.3);
+  background: #78716C;
 }
 
-/* Subtle dot grid backdrop */
+/* Subtle Warm Dot Pattern */
 .bg-grid-pattern {
   background-size: 24px 24px;
-  background-image: radial-gradient(rgba(255, 255, 255, 0.06) 1px, transparent 1px);
+  background-image: radial-gradient(rgba(120, 113, 108, 0.12) 1px, transparent 1px);
 }
 
-/* Live Agent Flow pulse animations */
-@keyframes flow-pulse {
+/* Warm Glow Effects */
+.glow-primary {
+  box-shadow: 0 0 20px -3px rgba(194, 65, 12, 0.35);
+}
+.glow-amber {
+  box-shadow: 0 0 20px -3px rgba(245, 158, 11, 0.35);
+}
+.glow-emerald {
+  box-shadow: 0 0 20px -3px rgba(22, 163, 74, 0.3);
+}
+
+/* Live Agent Flow Pulse Animation */
+@keyframes flow-pulse-warm {
   0%, 100% {
     opacity: 1;
     transform: scale(1);
-    box-shadow: 0 0 15px rgba(56, 189, 248, 0.6);
+    box-shadow: 0 0 12px rgba(194, 65, 12, 0.4);
   }
   50% {
-    opacity: 0.7;
-    transform: scale(1.03);
-    box-shadow: 0 0 30px rgba(56, 189, 248, 0.9);
+    opacity: 0.8;
+    transform: scale(1.02);
+    box-shadow: 0 0 22px rgba(194, 65, 12, 0.65);
   }
 }
 
 .node-active {
-  animation: flow-pulse 1.8s infinite ease-in-out;
+  animation: flow-pulse-warm 1.8s infinite ease-in-out;
 }

@@ -796,11 +796,23 @@ def respond_node(state: SupportState) -> Dict[str, Any]:
 def route_from_triage(s: SupportState) -> str:
     """
     Routing rules from triage:
+    - customer requested human escalation -> escalate
     - abusive sentiment -> escalate
     - critical priority without order ID -> escalate (direct human handoff)
     - transactional (is_transactional=True) -> policy_gate
     - faq / informational / unknown -> rag
     """
+    query = (s.get("sanitized_query") or s.get("user_query") or "").lower()
+    escalation_patterns = [
+        "human support", "human agent", "talk to a human", "speak to a human",
+        "human assistant", "connect me to an agent", "connect to agent",
+        "talk to an agent", "speak to an agent", "escalate", "escalation",
+        "transfer to supervisor", "talk to supervisor", "human specialist",
+        "customer service rep", "real person", "representative"
+    ]
+    if any(p in query for p in escalation_patterns):
+        return "escalate"
+
     if s.get("sentiment") == "abusive":
         return "escalate"
     if s.get("priority") == "Critical" and not s.get("extracted_order_id"):

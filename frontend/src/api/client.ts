@@ -87,6 +87,14 @@ export interface PendingApproval {
   order_id?: string;
   amount: number;
   user_id: string;
+  user_name?: string;
+  type?: 'refund_approval' | 'escalation';
+  status?: 'pending' | 'approved' | 'rejected';
+  decision?: 'approved' | 'rejected';
+  supervisor_id?: string;
+  decision_notes?: string;
+  decided_at?: string;
+  query?: string;
   reason: string;
   dossier: any;
   why_decision: WhyDecision;
@@ -190,9 +198,11 @@ export async function fetchTickets(status?: string, priority?: string): Promise<
   return res.json();
 }
 
-export async function fetchApprovals(): Promise<PendingApproval[]> {
-  const res = await fetch(`${API_BASE_URL}/approvals`);
-  if (!res.ok) throw new Error('Failed to fetch pending approvals');
+export async function fetchApprovals(status?: string): Promise<PendingApproval[]> {
+  const params = new URLSearchParams();
+  if (status && status !== 'all') params.append('status', status);
+  const res = await fetch(`${API_BASE_URL}/approvals?${params.toString()}`);
+  if (!res.ok) throw new Error('Failed to fetch approvals');
   return res.json();
 }
 

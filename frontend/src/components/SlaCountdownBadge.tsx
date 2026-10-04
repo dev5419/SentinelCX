@@ -56,14 +56,14 @@ export const SlaCountdownBadge: React.FC<SlaCountdownBadgeProps> = ({ deadlineIs
   }, [deadlineIso, priority]);
 
   const colorStyles = {
-    green: 'bg-emerald-950/80 border-emerald-800/60 text-emerald-300',
-    amber: 'bg-amber-950/80 border-amber-800/60 text-amber-300 animate-pulse',
-    red: 'bg-rose-950/90 border-rose-800/80 text-rose-300 font-bold animate-ping-slow'
+    green: 'bg-[#F0FDF4] border-[#16A34A]/40 text-[#16A34A]',
+    amber: 'bg-[#FFFBEB] border-[#F59E0B]/50 text-[#B45309] animate-pulse',
+    red: 'bg-[#FEF2F2] border-[#DC2626]/50 text-[#DC2626] font-bold'
   };
 
   return (
     <span
-      className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full border text-[10px] font-mono tracking-wider ${
+      className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full border text-[10px] font-mono tracking-wider ${
         colorStyles[timeLeft.status]
       }`}
     >

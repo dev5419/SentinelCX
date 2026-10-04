@@ -64,7 +64,7 @@ export function App() {
   };
 
   return (
-    <div className="min-h-screen bg-[#090d16] text-slate-100 flex flex-col bg-grid-pattern selection:bg-sky-500 selection:text-white">
+    <div className="min-h-screen bg-[#FAFAF9] text-[#1C1917] flex flex-col bg-grid-pattern selection:bg-[#C2410C] selection:text-white font-sans">
       {/* Top Navigation */}
       <Navbar
         currentTab={currentTab}

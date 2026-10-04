@@ -14,6 +14,7 @@ from fastapi.responses import StreamingResponse, JSONResponse
 from pydantic import BaseModel, Field
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.types import Command
+from langgraph.errors import GraphInterrupt
 
 # Ensure base directory in sys.path
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -21,6 +22,7 @@ if BASE_DIR not in sys.path:
     sys.path.insert(0, BASE_DIR)
 
 from core.graph import build_graph, SupportState
+from tools.order_tools import execute_refund
 from utils.mock_db import (
     reset_db,
     get_user,
@@ -57,6 +59,7 @@ graph = build_graph(checkpointer=checkpointer)
 # In-memory stores for Demo & Live Supervisor Center
 ACTIVE_TICKETS: Dict[str, Dict[str, Any]] = {}
 PENDING_APPROVALS: Dict[str, Dict[str, Any]] = {}
+APPROVAL_HISTORY: List[Dict[str, Any]] = []
 PII_AUDIT_FEED: List[Dict[str, Any]] = []
 
 
@@ -114,33 +117,207 @@ class UserProfile(BaseModel):
 # Helper Functions
 # ============================================================================
 
-def _seed_initial_tickets():
-    """Populates clean demo tickets from mock users if empty."""
-    if ACTIVE_TICKETS:
+def _seed_initial_tickets_and_approvals():
+    """Populates initial mock tickets, pending approvals, and approved/rejected history."""
+    if ACTIVE_TICKETS and PENDING_APPROVALS:
         return
+
     now = datetime.now(timezone.utc)
-    demo_samples = [
+
+    # 1. Seed Pending Problems (Escalated Human Inquiries & High-Value Approvals)
+    pending_items = [
         {
-            "ticket_id": "TCK-1001",
-            "thread_id": "demo_thread_01",
+            "approval_id": "APPR-1002",
+            "thread_id": "demo_thread_02",
+            "order_id": "ORD-1005",
+            "amount": 15000.0,
             "user_id": "user_1",
-            "user_name": "Ananya Sharma",
-            "query": "Mera order ORD-1001 ka refund chahiye please, kharab product aya hai",
-            "action": "answer",
-            "intent": "refund_request",
-            "priority": "Medium",
-            "sentiment": "neutral",
-            "status": "resolved",
-            "sla_deadline": (now + timedelta(hours=4)).isoformat(),
-            "created_at": (now - timedelta(minutes=45)).isoformat(),
-            "updated_at": (now - timedelta(minutes=40)).isoformat(),
-            "amount_at_risk": 1499.0
+            "user_name": "Alice Johnson",
+            "type": "refund_approval",
+            "status": "pending",
+            "reason": "High-value refund request: 4K Gaming Monitor (ORD-1005) of Rs 15,000.00 exceeds auto threshold (> Rs 2,000). Screen panel cracked on arrival.",
+            "dossier": {
+                "issue": "High-value refund request for 4K Gaming Monitor",
+                "proposed_action": "execute_refund for ORD-1005 of Rs 15000.00",
+                "proposed_amount": 15000.0
+            },
+            "why_decision": {
+                "intent": "refund_request",
+                "policy_rule": "High-Value Transaction Threshold (> Rs 2,000)",
+                "final_route": "hitl_approval"
+            },
+            "created_at": (now - timedelta(minutes=15)).isoformat()
         },
+        {
+            "approval_id": "ESC-2004",
+            "thread_id": "demo_thread_04",
+            "order_id": "ORD-1008",
+            "amount": 4500.0,
+            "user_id": "user_4",
+            "user_name": "Diana Prince",
+            "type": "escalation",
+            "status": "pending",
+            "reason": "Customer problem escalated for human assistant: Mesh office chair hydraulic piston cracked. Customer requested immediate human support specialist handoff.",
+            "dossier": {
+                "issue": "Hydraulic piston cracked on Ergonomic Chair",
+                "proposed_action": "Direct human support specialist handoff"
+            },
+            "why_decision": {
+                "intent": "refund_request",
+                "final_route": "human_escalation"
+            },
+            "created_at": (now - timedelta(minutes=25)).isoformat()
+        },
+        {
+            "approval_id": "ESC-3006",
+            "thread_id": "demo_thread_06",
+            "order_id": "General Support",
+            "amount": 0.0,
+            "user_id": "user_3",
+            "user_name": "Charlie Davis",
+            "type": "escalation",
+            "status": "pending",
+            "reason": "Customer problem escalated for human assistant: Account verification failure and mobile OTP timeout for unverified user.",
+            "dossier": {
+                "issue": "KYC / Mobile OTP authentication issue",
+                "proposed_action": "Manual account verification by tier-2 agent"
+            },
+            "why_decision": {
+                "intent": "login",
+                "final_route": "human_escalation"
+            },
+            "created_at": (now - timedelta(minutes=40)).isoformat()
+        },
+        {
+            "approval_id": "ESC-4008",
+            "thread_id": "demo_thread_08",
+            "order_id": "ORD-1021",
+            "amount": 2899.0,
+            "user_id": "user_4",
+            "user_name": "Diana Prince",
+            "type": "escalation",
+            "status": "pending",
+            "reason": "Escalated for human assistant: Customer expressed strong frustration regarding dual monitor desk mount clamp compatibility and requested supervisor callback.",
+            "dossier": {
+                "issue": "Dual monitor mount clamp incompatible with curved desk",
+                "proposed_action": "Supervisor intervention & return pickup"
+            },
+            "why_decision": {
+                "intent": "refund_request",
+                "final_route": "human_escalation"
+            },
+            "created_at": (now - timedelta(minutes=5)).isoformat()
+        }
+    ]
+
+    for p in pending_items:
+        PENDING_APPROVALS[p["thread_id"]] = p
+
+    # 2. Seed Approved & Rejected History Problems
+    approved_rejected_samples = [
+        {
+            "approval_id": "APPR-8801",
+            "thread_id": "hist_thread_01",
+            "order_id": "ORD-1001",
+            "amount": 1499.0,
+            "user_id": "user_1",
+            "user_name": "Alice Johnson",
+            "type": "refund_approval",
+            "status": "approved",
+            "decision": "approved",
+            "supervisor_id": "sup_vikram_204",
+            "decision_notes": "Damaged headphones return authorized. Courier transit photo report verified.",
+            "decided_at": (now - timedelta(hours=2)).isoformat(),
+            "reason": "Damaged noise-cancelling headphones delivered 3 days ago.",
+            "dossier": {"issue": "Transit damage", "proposed_action": "execute_refund"},
+            "why_decision": {"intent": "refund_request", "final_route": "hitl_approval"},
+            "created_at": (now - timedelta(hours=2, minutes=15)).isoformat()
+        },
+        {
+            "approval_id": "APPR-8802",
+            "thread_id": "hist_thread_02",
+            "order_id": "ORD-1010",
+            "amount": 1999.0,
+            "user_id": "user_5",
+            "user_name": "Evan Wright",
+            "type": "refund_approval",
+            "status": "approved",
+            "decision": "approved",
+            "supervisor_id": "sup_ananya_102",
+            "decision_notes": "Webcam autofocus failure. Approved full refund under 14-day warranty.",
+            "decided_at": (now - timedelta(hours=5)).isoformat(),
+            "reason": "1080p Streaming Webcam hardware focus sensor defective.",
+            "dossier": {"issue": "Defective autofocus sensor", "proposed_action": "execute_refund"},
+            "why_decision": {"intent": "refund_request", "final_route": "hitl_approval"},
+            "created_at": (now - timedelta(hours=5, minutes=20)).isoformat()
+        },
+        {
+            "approval_id": "APPR-8803",
+            "thread_id": "hist_thread_03",
+            "order_id": "ORD-1033",
+            "amount": 1899.0,
+            "user_id": "user_8",
+            "user_name": "Pooja Hegde",
+            "type": "refund_approval",
+            "status": "approved",
+            "decision": "approved",
+            "supervisor_id": "sup_vikram_204",
+            "decision_notes": "Size mismatch within 7-day apparel window. Return pickup verified.",
+            "decided_at": (now - timedelta(hours=8)).isoformat(),
+            "reason": "Cotton Oversized Graphic Hoodie size exchange/refund.",
+            "dossier": {"issue": "Apparel size issue", "proposed_action": "execute_refund"},
+            "why_decision": {"intent": "refund_request", "final_route": "hitl_approval"},
+            "created_at": (now - timedelta(hours=8, minutes=30)).isoformat()
+        },
+        {
+            "approval_id": "REJ-9901",
+            "thread_id": "hist_thread_04",
+            "order_id": "ORD-1002",
+            "amount": 1800.0,
+            "user_id": "user_1",
+            "user_name": "Alice Johnson",
+            "type": "refund_approval",
+            "status": "rejected",
+            "decision": "rejected",
+            "supervisor_id": "sup_vikram_204",
+            "decision_notes": "Declined under policy: Delivered 30 days ago, which exceeds statutory 14-day return window.",
+            "decided_at": (now - timedelta(hours=12)).isoformat(),
+            "reason": "Mechanical Keyboard return attempted 30 days after delivery.",
+            "dossier": {"issue": "Expired return window", "proposed_action": "reject"},
+            "why_decision": {"intent": "refund_request", "policy_rule": "14-Day Limit", "final_route": "reject"},
+            "created_at": (now - timedelta(hours=12, minutes=10)).isoformat()
+        },
+        {
+            "approval_id": "REJ-9902",
+            "thread_id": "hist_thread_05",
+            "order_id": "ORD-1004",
+            "amount": 2500.0,
+            "user_id": "user_2",
+            "user_name": "Bob Smith",
+            "type": "refund_approval",
+            "status": "rejected",
+            "decision": "rejected",
+            "supervisor_id": "sup_vikram_204",
+            "decision_notes": "Declined: Order was cancelled before dispatch. Funds auto-reversed by payment gateway.",
+            "decided_at": (now - timedelta(hours=16)).isoformat(),
+            "reason": "Duplicate refund claim on cancelled order ORD-1004.",
+            "dossier": {"issue": "Order already cancelled", "proposed_action": "reject"},
+            "why_decision": {"intent": "refund_request", "final_route": "reject"},
+            "created_at": (now - timedelta(hours=16, minutes=15)).isoformat()
+        }
+    ]
+
+    for item in approved_rejected_samples:
+        APPROVAL_HISTORY.append(item)
+
+    # 3. Seed corresponding Active Tickets
+    demo_tickets = [
+        # Pending tickets
         {
             "ticket_id": "TCK-1002",
             "thread_id": "demo_thread_02",
             "user_id": "user_1",
-            "user_name": "Ananya Sharma",
+            "user_name": "Alice Johnson",
             "query": "Order ORD-1005 ka refund process karo Rs 15000 ka amount hai",
             "action": "hitl_interrupt",
             "intent": "refund_request",
@@ -148,15 +325,145 @@ def _seed_initial_tickets():
             "sentiment": "frustrated",
             "status": "pending_approval",
             "sla_deadline": (now + timedelta(minutes=15)).isoformat(),
-            "created_at": (now - timedelta(minutes=10)).isoformat(),
-            "updated_at": (now - timedelta(minutes=10)).isoformat(),
+            "created_at": (now - timedelta(minutes=15)).isoformat(),
+            "updated_at": (now - timedelta(minutes=15)).isoformat(),
             "amount_at_risk": 15000.0
+        },
+        {
+            "ticket_id": "TCK-2004",
+            "thread_id": "demo_thread_04",
+            "user_id": "user_4",
+            "user_name": "Diana Prince",
+            "query": "Hydraulic piston cracked on ORD-1008 mesh chair. Need human support specialist immediately!",
+            "action": "escalate",
+            "intent": "refund_request",
+            "priority": "High",
+            "sentiment": "frustrated",
+            "status": "pending_approval",
+            "sla_deadline": (now + timedelta(minutes=45)).isoformat(),
+            "created_at": (now - timedelta(minutes=25)).isoformat(),
+            "updated_at": (now - timedelta(minutes=25)).isoformat(),
+            "amount_at_risk": 4500.0
+        },
+        {
+            "ticket_id": "TCK-3006",
+            "thread_id": "demo_thread_06",
+            "user_id": "user_3",
+            "user_name": "Charlie Davis",
+            "query": "I cannot receive the OTP for billing update on my unverified account. Connect me to an agent.",
+            "action": "escalate",
+            "intent": "login",
+            "priority": "High",
+            "sentiment": "neutral",
+            "status": "pending_approval",
+            "sla_deadline": (now + timedelta(hours=1)).isoformat(),
+            "created_at": (now - timedelta(minutes=40)).isoformat(),
+            "updated_at": (now - timedelta(minutes=40)).isoformat(),
+            "amount_at_risk": 0.0
+        },
+        {
+            "ticket_id": "TCK-4008",
+            "thread_id": "demo_thread_08",
+            "user_id": "user_4",
+            "user_name": "Diana Prince",
+            "query": "Your dual mount clamp does not fit my desk! Transfer to supervisor right now, worst experience!",
+            "action": "escalate",
+            "intent": "refund_request",
+            "priority": "Critical",
+            "sentiment": "abusive",
+            "status": "pending_approval",
+            "sla_deadline": (now + timedelta(minutes=10)).isoformat(),
+            "created_at": (now - timedelta(minutes=5)).isoformat(),
+            "updated_at": (now - timedelta(minutes=5)).isoformat(),
+            "amount_at_risk": 2899.0
+        },
+        # Approved tickets (resolved)
+        {
+            "ticket_id": "TCK-1001",
+            "thread_id": "hist_thread_01",
+            "user_id": "user_1",
+            "user_name": "Alice Johnson",
+            "query": "Mera order ORD-1001 ka refund chahiye please, kharab product aya hai",
+            "action": "answer",
+            "intent": "refund_request",
+            "priority": "Medium",
+            "sentiment": "neutral",
+            "status": "resolved",
+            "sla_deadline": (now - timedelta(hours=2)).isoformat(),
+            "created_at": (now - timedelta(hours=2, minutes=15)).isoformat(),
+            "updated_at": (now - timedelta(hours=2)).isoformat(),
+            "amount_at_risk": 1499.0
+        },
+        {
+            "ticket_id": "TCK-8802",
+            "thread_id": "hist_thread_02",
+            "user_id": "user_5",
+            "user_name": "Evan Wright",
+            "query": "Order ORD-1010 webcam autofocus defective, please refund",
+            "action": "answer",
+            "intent": "refund_request",
+            "priority": "Medium",
+            "sentiment": "neutral",
+            "status": "resolved",
+            "sla_deadline": (now - timedelta(hours=5)).isoformat(),
+            "created_at": (now - timedelta(hours=5, minutes=20)).isoformat(),
+            "updated_at": (now - timedelta(hours=5)).isoformat(),
+            "amount_at_risk": 1999.0
+        },
+        {
+            "ticket_id": "TCK-8803",
+            "thread_id": "hist_thread_03",
+            "user_id": "user_8",
+            "user_name": "Pooja Hegde",
+            "query": "ORD-1033 size exchange within 7 days",
+            "action": "answer",
+            "intent": "refund_request",
+            "priority": "Medium",
+            "sentiment": "neutral",
+            "status": "resolved",
+            "sla_deadline": (now - timedelta(hours=8)).isoformat(),
+            "created_at": (now - timedelta(hours=8, minutes=30)).isoformat(),
+            "updated_at": (now - timedelta(hours=8)).isoformat(),
+            "amount_at_risk": 1899.0
+        },
+        # Rejected tickets
+        {
+            "ticket_id": "TCK-9901",
+            "thread_id": "hist_thread_04",
+            "user_id": "user_1",
+            "user_name": "Alice Johnson",
+            "query": "ORD-1002 keyboard refund request (delivered 30 days ago)",
+            "action": "reject",
+            "intent": "refund_request",
+            "priority": "Medium",
+            "sentiment": "neutral",
+            "status": "rejected",
+            "sla_deadline": (now - timedelta(hours=12)).isoformat(),
+            "created_at": (now - timedelta(hours=12, minutes=10)).isoformat(),
+            "updated_at": (now - timedelta(hours=12)).isoformat(),
+            "amount_at_risk": 1800.0
+        },
+        {
+            "ticket_id": "TCK-9902",
+            "thread_id": "hist_thread_05",
+            "user_id": "user_2",
+            "user_name": "Bob Smith",
+            "query": "ORD-1004 refund request for cancelled item",
+            "action": "reject",
+            "intent": "refund_request",
+            "priority": "Low",
+            "sentiment": "neutral",
+            "status": "rejected",
+            "sla_deadline": (now - timedelta(hours=16)).isoformat(),
+            "created_at": (now - timedelta(hours=16, minutes=15)).isoformat(),
+            "updated_at": (now - timedelta(hours=16)).isoformat(),
+            "amount_at_risk": 2500.0
         },
         {
             "ticket_id": "TCK-1003",
             "thread_id": "demo_thread_03",
             "user_id": "user_2",
-            "user_name": "Rahul Verma",
+            "user_name": "Bob Smith",
             "query": "What is the return and refund policy window?",
             "action": "answer",
             "intent": "faq",
@@ -169,11 +476,12 @@ def _seed_initial_tickets():
             "amount_at_risk": 0.0
         }
     ]
-    for sample in demo_samples:
-        ACTIVE_TICKETS[sample["thread_id"]] = sample
+
+    for t in demo_tickets:
+        ACTIVE_TICKETS[t["thread_id"]] = t
 
 
-_seed_initial_tickets()
+_seed_initial_tickets_and_approvals()
 
 
 def _sanitize_for_export(obj: Any) -> Any:
@@ -227,20 +535,47 @@ def chat_turn(req: ChatRequest):
     pending_approval_id = None
 
     action = res.get("action", "answer")
-    if is_interrupted:
-        action = "hitl_interrupt"
-        pending_approval_id = f"APPR-{req.thread_id[:8].upper()}"
-        intr_obj = interrupt_data[0].value if interrupt_data else {}
-        dossier = intr_obj.get("dossier", {})
-        why_dec = intr_obj.get("why_decision", res.get("why_decision", {}))
+    is_escalated = (action == "escalate")
+    is_pending = is_interrupted or is_escalated
+
+    usr = get_user(req.user_id)
+    user_name = usr.get("name", req.user_id) if usr else req.user_id
+
+    if is_pending:
+        pending_approval_id = (
+            f"APPR-{req.thread_id[:8].upper()}" if is_interrupted else f"ESC-{req.thread_id[:6].upper()}"
+        )
+        if is_interrupted:
+            action = "hitl_interrupt"
+            intr_obj = interrupt_data[0].value if interrupt_data else {}
+            dossier = intr_obj.get("dossier", {})
+            why_dec = intr_obj.get("why_decision", res.get("why_decision", {}))
+            reason = intr_obj.get("message", "High-value transaction requires supervisor approval")
+            req_type = "refund_approval"
+        else:
+            dossier = res.get("handoff_dossier") or {
+                "issue": req.user_query,
+                "proposed_action": "Supervisor intervention & customer callback"
+            }
+            why_dec = res.get("why_decision") or {
+                "intent": res.get("intent", "general_inquiry"),
+                "final_route": "human_escalation",
+                "reason": "Customer problem escalated for human assistant"
+            }
+            reason = res.get("answer") or f"Customer problem escalated for human assistant: {req.user_query}"
+            req_type = "escalation"
 
         PENDING_APPROVALS[req.thread_id] = {
             "approval_id": pending_approval_id,
             "thread_id": req.thread_id,
-            "order_id": res.get("extracted_order_id"),
-            "amount": res.get("amount_at_risk") or 0.0,
+            "order_id": res.get("extracted_order_id") or "General Support",
+            "amount": float(res.get("amount_at_risk") or 0.0),
             "user_id": req.user_id,
-            "reason": intr_obj.get("message", "High-value transaction requires supervisor approval"),
+            "user_name": user_name,
+            "type": req_type,
+            "status": "pending",
+            "reason": reason,
+            "query": req.user_query,
             "dossier": dossier,
             "why_decision": why_dec,
             "created_at": datetime.now(timezone.utc).isoformat()
@@ -267,13 +602,9 @@ def chat_turn(req: ChatRequest):
                     PII_AUDIT_FEED.pop()
 
     # Update Active Tickets Registry
-    usr = get_user(req.user_id)
-    user_name = usr.get("name", req.user_id) if usr else req.user_id
-    ticket_status = "pending_approval" if is_interrupted else (
-        "escalated" if action == "escalate" else (
-            "rejected" if action == "reject" else (
-                "open" if action == "clarify" else "resolved"
-            )
+    ticket_status = "pending_approval" if is_pending else (
+        "rejected" if action == "reject" else (
+            "open" if action == "clarify" else "resolved"
         )
     )
 
@@ -288,10 +619,10 @@ def chat_turn(req: ChatRequest):
         "priority": res.get("priority", "Medium"),
         "sentiment": res.get("sentiment", "neutral"),
         "status": ticket_status,
-        "sla_deadline": res.get("sla_deadline"),
+        "sla_deadline": res.get("sla_deadline") or (datetime.now(timezone.utc) + timedelta(minutes=30)).isoformat(),
         "created_at": ACTIVE_TICKETS.get(req.thread_id, {}).get("created_at", datetime.now(timezone.utc).isoformat()),
         "updated_at": datetime.now(timezone.utc).isoformat(),
-        "amount_at_risk": res.get("amount_at_risk") or 0.0
+        "amount_at_risk": float(res.get("amount_at_risk") or 0.0)
     }
 
     # Build clean sanitized response
@@ -321,7 +652,7 @@ def chat_turn(req: ChatRequest):
         citations=res.get("retrieved_docs", []),
         why_decision=why_dec,
         trace=res.get("trace", []),
-        is_pending_approval=is_interrupted,
+        is_pending_approval=is_pending,
         pending_approval_id=pending_approval_id,
         handoff_dossier=dossier,
         pii_counts=pii_counts
@@ -365,6 +696,9 @@ async def chat_stream(
                     ):
                         evt_queue.put(("event", evt))
                     evt_queue.put(("done", None))
+                except GraphInterrupt:
+                    # Expected pause when hitting hitl_interrupt node
+                    evt_queue.put(("done", None))
                 except Exception as ex:
                     evt_queue.put(("error", ex))
 
@@ -390,9 +724,12 @@ async def chat_stream(
 
                         pending_id = f"APPR-{thread_id[:8].upper()}"
                         order_id = final_state.get("extracted_order_id") or "ORD-1005"
-                        amount = final_state.get("amount_at_risk") or 15000.0
+                        amount = float(final_state.get("amount_at_risk") or 15000.0)
                         dossier = intr_val.get("dossier", {})
                         why_dec = intr_val.get("why_decision", {})
+
+                        u_record = get_user(user_id)
+                        u_name = u_record.get("name", user_id) if u_record else user_id
 
                         PENDING_APPROVALS[thread_id] = {
                             "approval_id": pending_id,
@@ -400,14 +737,16 @@ async def chat_stream(
                             "order_id": order_id,
                             "amount": amount,
                             "user_id": user_id,
+                            "user_name": u_name,
+                            "type": "refund_approval",
+                            "status": "pending",
                             "reason": intr_val.get("message", f"Refund of Rs {amount:.2f} for {order_id} requires supervisor approval."),
+                            "query": user_query,
                             "dossier": dossier,
                             "why_decision": why_dec,
                             "created_at": datetime.now(timezone.utc).isoformat()
                         }
 
-                        u_record = get_user(user_id)
-                        u_name = u_record.get("name", user_id) if u_record else user_id
                         ACTIVE_TICKETS[thread_id] = {
                             "ticket_id": f"TCK-{thread_id[:6].upper()}",
                             "thread_id": thread_id,
@@ -454,29 +793,97 @@ async def chat_stream(
                     final_state.update(node_update)
                     await asyncio.sleep(0.05)  # brief pacing for smooth UI animation
 
-            # Check if execution paused on interrupt
+            # Check if execution paused on interrupt or escalated
             snapshot = await asyncio.to_thread(graph.get_state, config)
-            if snapshot.next and "hitl_interrupt" in snapshot.next or snapshot.tasks and any(t.interrupts for t in snapshot.tasks):
-                pending_id = f"APPR-{thread_id[:8].upper()}"
-                interrupt_val = snapshot.tasks[0].interrupts[0].value if snapshot.tasks and snapshot.tasks[0].interrupts else {}
+            res = snapshot.values if snapshot else {}
+            if not res:
+                res = final_state
+            else:
+                final_state.update(res)
+
+            action = res.get("action", final_state.get("action", "answer"))
+            is_int = bool(snapshot.next) if snapshot else False
+            if not is_int and snapshot and snapshot.tasks:
+                is_int = any(bool(getattr(t, "interrupts", None)) for t in snapshot.tasks)
+
+            is_escalated = (action == "escalate")
+            is_pending = is_int or is_escalated
+
+            usr = get_user(user_id)
+            user_name = usr.get("name", user_id) if usr else user_id
+            order_id = res.get("extracted_order_id") or final_state.get("extracted_order_id") or "General Support"
+            amount = float(res.get("amount_at_risk") or final_state.get("amount_at_risk") or 0.0)
+            pending_id = (
+                f"APPR-{thread_id[:8].upper()}" if is_int else (f"ESC-{thread_id[:6].upper()}" if is_escalated else None)
+            )
+
+            if is_pending and thread_id not in PENDING_APPROVALS:
+                interrupt_val = {}
+                if snapshot and snapshot.tasks and snapshot.tasks[0].interrupts:
+                    intr_raw = snapshot.tasks[0].interrupts[0].value
+                    interrupt_val = intr_raw if isinstance(intr_raw, dict) else {}
+
+                if is_int:
+                    dossier = interrupt_val.get("dossier") or res.get("handoff_dossier") or {}
+                    why_dec = interrupt_val.get("why_decision") or res.get("why_decision") or {}
+                    reason = interrupt_val.get("message") or f"Refund of Rs {amount:.2f} for {order_id} requires supervisor approval."
+                    req_type = "refund_approval"
+                else:
+                    dossier = res.get("handoff_dossier") or {
+                        "issue": user_query,
+                        "proposed_action": "Supervisor intervention & customer callback"
+                    }
+                    why_dec = res.get("why_decision") or {
+                        "intent": res.get("intent", "general_inquiry"),
+                        "final_route": "human_escalation",
+                        "reason": "Customer problem escalated for human assistant"
+                    }
+                    reason = res.get("answer") or f"Customer problem escalated for human assistant: {user_query}"
+                    req_type = "escalation"
+
                 PENDING_APPROVALS[thread_id] = {
                     "approval_id": pending_id,
                     "thread_id": thread_id,
-                    "order_id": final_state.get("extracted_order_id"),
-                    "amount": final_state.get("amount_at_risk") or 0.0,
+                    "order_id": order_id,
+                    "amount": amount,
                     "user_id": user_id,
-                    "reason": interrupt_val.get("message", "High-value refund paused for supervisor review"),
-                    "dossier": interrupt_val.get("dossier", {}),
+                    "user_name": user_name,
+                    "type": req_type,
+                    "status": "pending",
+                    "reason": reason,
+                    "query": user_query,
+                    "dossier": dossier,
+                    "why_decision": why_dec,
                     "created_at": datetime.now(timezone.utc).isoformat()
                 }
-                yield f"event: interrupt\ndata: {json.dumps({'thread_id': thread_id, 'approval_id': pending_id, 'interrupt': interrupt_val})}\n\n"
-            
-            # Emit final completed turn
-            res = snapshot.values
-            action = res.get("action", "answer")
-            is_int = bool(snapshot.next)
 
-            final_answer = res.get("answer", "")
+                if is_int:
+                    yield f"event: interrupt\ndata: {json.dumps({'thread_id': thread_id, 'approval_id': pending_id, 'interrupt': interrupt_val})}\n\n"
+
+            # Always update ACTIVE_TICKETS for every completed stream turn
+            ticket_status = "pending_approval" if is_pending else (
+                "rejected" if action == "reject" else (
+                    "open" if action == "clarify" else "resolved"
+                )
+            )
+            ACTIVE_TICKETS[thread_id] = {
+                "ticket_id": f"TCK-{thread_id[:6].upper()}",
+                "thread_id": thread_id,
+                "user_id": user_id,
+                "user_name": user_name,
+                "query": user_query,
+                "action": "hitl_interrupt" if is_int else action,
+                "intent": res.get("intent", final_state.get("intent", "unknown")),
+                "priority": res.get("priority", final_state.get("priority", "Medium")),
+                "sentiment": res.get("sentiment", final_state.get("sentiment", "neutral")),
+                "status": ticket_status,
+                "sla_deadline": res.get("sla_deadline") or (datetime.now(timezone.utc) + timedelta(minutes=30)).isoformat(),
+                "created_at": ACTIVE_TICKETS.get(thread_id, {}).get("created_at", datetime.now(timezone.utc).isoformat()),
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+                "amount_at_risk": amount
+            }
+
+            final_answer = res.get("answer", final_state.get("answer", ""))
             if is_int:
                 final_answer = (
                     "Aapka refund request high value (> Rs 2,000) hone ke kaaran supervisor review ke liye forward kar diya gaya hai."
@@ -488,16 +895,17 @@ async def chat_stream(
                 "thread_id": thread_id,
                 "answer": final_answer,
                 "action": "hitl_interrupt" if is_int else action,
-                "intent": res.get("intent", "unknown"),
-                "intent_confidence": res.get("intent_confidence", 0.0),
-                "sentiment": res.get("sentiment", "neutral"),
-                "priority": res.get("priority", "Medium"),
-                "language": res.get("language", "en"),
-                "grounded": res.get("grounded"),
-                "citations": res.get("retrieved_docs", []),
-                "why_decision": res.get("why_decision", {}),
+                "intent": res.get("intent", final_state.get("intent", "unknown")),
+                "intent_confidence": float(res.get("intent_confidence", final_state.get("intent_confidence", 0.0))),
+                "sentiment": res.get("sentiment", final_state.get("sentiment", "neutral")),
+                "priority": res.get("priority", final_state.get("priority", "Medium")),
+                "language": res.get("language", final_state.get("language", "en")),
+                "grounded": res.get("grounded", final_state.get("grounded")),
+                "citations": res.get("retrieved_docs", final_state.get("retrieved_docs", [])),
+                "why_decision": res.get("why_decision", final_state.get("why_decision", {})),
                 "trace": res.get("trace", accumulated_trace),
-                "is_pending_approval": is_int
+                "is_pending_approval": is_pending,
+                "pending_approval_id": pending_id
             }
             yield f"event: complete\ndata: {json.dumps(_sanitize_for_export(complete_payload))}\n\n"
 
@@ -527,11 +935,26 @@ def list_tickets(
 
 
 @app.get("/approvals")
-def list_pending_approvals():
-    """Returns all requests paused at the HITL approval gate awaiting supervisor action."""
-    approvals = list(PENDING_APPROVALS.values())
-    approvals.sort(key=lambda x: x.get("created_at", ""), reverse=True)
-    return _sanitize_for_export(approvals)
+def list_approvals(status: Optional[str] = Query(None)):
+    """
+    Returns requests awaiting supervisor action and historical approved/rejected problems.
+    Supports filtering by status ('pending', 'approved', 'rejected', or 'all').
+    """
+    pending_list = list(PENDING_APPROVALS.values())
+    history_list = list(APPROVAL_HISTORY)
+
+    if status == "pending":
+        results = pending_list
+    elif status in ["approved", "rejected"]:
+        results = [h for h in history_list if h.get("status") == status]
+    elif status == "all" or not status:
+        results = pending_list + history_list
+    else:
+        results = [i for i in (pending_list + history_list) if i.get("status") == status]
+
+    # Sort newest decided / created first
+    results.sort(key=lambda x: x.get("decided_at", x.get("created_at", "")), reverse=True)
+    return _sanitize_for_export(results)
 
 
 @app.post("/approvals/{thread_id}")
@@ -541,35 +964,93 @@ def decide_approval(
 ):
     """
     Human-in-the-Loop decision endpoint.
-    Resumes graph execution from hitl_interrupt with the supervisor's decision (approved / rejected).
-    Executes the refund if approved, logs to SQLite audit trail, and updates customer state.
+    Processes supervisor approval or rejection.
+    If graph is paused on an interrupt, resumes graph execution.
+    If refund approval, executes refund in SQLite and logs to audit trail.
+    Updates PENDING_APPROVALS, APPROVAL_HISTORY, and ACTIVE_TICKETS in real time.
     """
-    if thread_id not in PENDING_APPROVALS:
-        # Check if thread exists in graph state
-        cfg = {"configurable": {"thread_id": thread_id}}
-        state = graph.get_state(cfg)
-        if not state or not state.next:
-            raise HTTPException(status_code=404, detail=f"No pending approval found for thread: {thread_id}")
+    pending_item = PENDING_APPROVALS.get(thread_id)
+    cfg = {"configurable": {"thread_id": thread_id}}
+    state = graph.get_state(cfg)
 
-    config = {"configurable": {"thread_id": thread_id}}
-    command = Command(resume={
+    if not pending_item and (not state or not state.next):
+        # Check if already decided in APPROVAL_HISTORY
+        hist_match = next((h for h in APPROVAL_HISTORY if h.get("thread_id") == thread_id or h.get("approval_id") == thread_id), None)
+        if hist_match:
+            return _sanitize_for_export({
+                "status": "success",
+                "thread_id": thread_id,
+                "decision": hist_match.get("decision", decision_req.decision),
+                "supervisor_id": hist_match.get("supervisor_id", decision_req.supervisor_id),
+                "message": f"Request was already {hist_match.get('status')}"
+            })
+        raise HTTPException(status_code=404, detail=f"No pending approval found for thread: {thread_id}")
+
+    res = {}
+    # If graph has an active interrupt awaiting resume, resume it
+    if state and state.next:
+        command = Command(resume={
+            "status": decision_req.decision,
+            "supervisor": decision_req.supervisor_id,
+            "notes": decision_req.notes
+        })
+        try:
+            res = graph.invoke(command, config=cfg)
+        except Exception:
+            pass
+
+    item_data = pending_item or {}
+    order_id = item_data.get("order_id") or res.get("extracted_order_id")
+    user_id = item_data.get("user_id") or "user_1"
+    amount = float(item_data.get("amount") or res.get("amount_at_risk") or 0.0)
+
+    # If supervisor approved a refund that hasn't been executed yet
+    if decision_req.decision == "approved":
+        if order_id and order_id != "General Support" and amount > 0 and not res.get("tool_history"):
+            try:
+                execute_refund(
+                    order_id=order_id,
+                    amount=amount,
+                    reason=decision_req.notes or "Supervisor approved high-value refund",
+                    approved_by=decision_req.supervisor_id,
+                    user_id=user_id,
+                    session=f"session_{thread_id}"
+                )
+            except Exception:
+                pass
+
+    # Log to SQLite compliance audit trail
+    log_audit(
+        session=f"session_{thread_id}",
+        action="hitl_approval",
+        input_data=json.dumps({
+            "thread_id": thread_id,
+            "order_id": order_id,
+            "amount": amount,
+            "decision": decision_req.decision
+        }),
+        decision=decision_req.decision.upper(),
+        reason=decision_req.notes or f"Supervisor {decision_req.supervisor_id} marked {decision_req.decision.upper()}"
+    )
+
+    # Move from PENDING_APPROVALS to APPROVAL_HISTORY
+    popped = PENDING_APPROVALS.pop(thread_id, None) or item_data
+    history_record = {
+        **popped,
         "status": decision_req.decision,
-        "supervisor": decision_req.supervisor_id,
-        "notes": decision_req.notes
-    })
+        "decision": decision_req.decision,
+        "supervisor_id": decision_req.supervisor_id,
+        "decision_notes": decision_req.notes or (
+            "Approved by supervisor" if decision_req.decision == "approved" else "Rejected under company policy"
+        ),
+        "decided_at": datetime.now(timezone.utc).isoformat()
+    }
+    APPROVAL_HISTORY.insert(0, history_record)
 
-    try:
-        res = graph.invoke(command, config=config)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to resume graph: {str(e)}")
-
-    # Remove from pending approvals
-    PENDING_APPROVALS.pop(thread_id, None)
-
-    # Update ticket status in active tickets registry
+    # Update active tickets in real time
     if thread_id in ACTIVE_TICKETS:
         ACTIVE_TICKETS[thread_id]["status"] = "resolved" if decision_req.decision == "approved" else "rejected"
-        ACTIVE_TICKETS[thread_id]["action"] = res.get("action", "answer")
+        ACTIVE_TICKETS[thread_id]["action"] = "answer" if decision_req.decision == "approved" else "reject"
         ACTIVE_TICKETS[thread_id]["updated_at"] = datetime.now(timezone.utc).isoformat()
 
     return _sanitize_for_export({
@@ -577,8 +1058,8 @@ def decide_approval(
         "thread_id": thread_id,
         "decision": decision_req.decision,
         "supervisor_id": decision_req.supervisor_id,
-        "answer": res.get("answer", ""),
-        "action": res.get("action", "answer"),
+        "answer": res.get("answer", f"Request {decision_req.decision} by supervisor {decision_req.supervisor_id}"),
+        "action": res.get("action", "answer" if decision_req.decision == "approved" else "reject"),
         "why_decision": res.get("why_decision", {}),
         "trace": res.get("trace", [])
     })
@@ -798,7 +1279,7 @@ def trigger_redteam():
     """
     results = run_redteam()
     # Re-seed demo tickets so supervisor dashboard remains fully populated
-    _seed_initial_tickets()
+    _seed_initial_tickets_and_approvals()
 
     all_passed = all(r.get("passed", False) for r in results)
     passed_count = sum(1 for r in results if r.get("passed", False))
@@ -838,8 +1319,9 @@ def reset_demo_state():
     reset_db()
     ACTIVE_TICKETS.clear()
     PENDING_APPROVALS.clear()
+    APPROVAL_HISTORY.clear()
     PII_AUDIT_FEED.clear()
-    _seed_initial_tickets()
+    _seed_initial_tickets_and_approvals()
 
     return {
         "status": "ok",

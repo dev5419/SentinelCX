@@ -118,64 +118,71 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
         currentUser?.user_id || 'user_1',
         (eventType, data) => {
           eventCount++;
-          if (eventType === 'node_complete') {
-            setActiveNode(null);
+
+          if (eventType === 'node_start') {
+            setActiveNode(data.node);
+          } else if (eventType === 'node_complete') {
             setCompletedNodes((prev) => new Set([...prev, data.node]));
-            if (data.summary) {
-              setCurrentTrace((prev) => [
-                ...prev,
-                { node: data.node, summary: data.summary, duration_ms: data.duration_ms }
-              ]);
+            if (data.trace_step) {
+              setCurrentTrace((prev) => [...prev, data.trace_step]);
             }
-          } else if (eventType === 'interrupt') {
-            setIsCurrentPendingApproval(true);
-          } else if (eventType === 'complete') {
-            streamCleanupRef.current = null;
-            // Process complete payload
-            setCurrentWhyDecision(data.why_decision);
-            const isInt = data.action === 'hitl_interrupt' || data.is_pending_approval;
-            setIsCurrentPendingApproval(isInt);
+          } else if (eventType === 'chat_complete') {
+            setIsProcessing(false);
+            setActiveNode(null);
+
+            const why: WhyDecision | undefined = data.why_decision;
+            setCurrentWhyDecision(why);
+            setIsCurrentPendingApproval(Boolean(data.is_pending_approval));
 
             const botMsg: Message = {
               id: `bot_${Date.now()}`,
               sender: 'assistant',
-              content: data.answer || 'Your request has been processed.',
+              content: data.final_response || 'No response generated.',
               timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
               action: data.action,
               language: data.language,
               sentiment: data.sentiment,
               priority: data.priority,
               grounded: data.grounded,
-              citations: data.citations || [],
-              whyDecision: data.why_decision,
-              isPendingApproval: isInt
+              citations: data.citations,
+              whyDecision: why,
+              isPendingApproval: data.is_pending_approval
             };
             setMessages((prev) => [...prev, botMsg]);
+          } else if (eventType === 'chat_error') {
             setIsProcessing(false);
+            setActiveNode(null);
+            setMessages((prev) => [
+              ...prev,
+              {
+                id: `err_${Date.now()}`,
+                sender: 'assistant',
+                content: `An error occurred: ${data.error || 'Agent execution failed'}`,
+                timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                action: 'clarify'
+              }
+            ]);
           }
         },
         async (streamErr) => {
-          streamCleanupRef.current = null;
-          // Only fallback to REST if stream dropped before any events were received
+          // Fallback to synchronous REST endpoint if SSE stream fails or is closed
           if (eventCount === 0) {
             try {
               const res = await sendChatTurn(activeThread, query, currentUser?.user_id || 'user_1');
-              setCompletedNodes(new Set(res.trace.map((t) => t.node)));
-              setCurrentTrace(res.trace);
               setCurrentWhyDecision(res.why_decision);
-              setIsCurrentPendingApproval(res.is_pending_approval);
+              setIsCurrentPendingApproval(Boolean(res.is_pending_approval));
 
               const botMsg: Message = {
                 id: `bot_${Date.now()}`,
                 sender: 'assistant',
                 content: res.answer,
                 timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-                action: res.action,
+                action: res.action as any,
                 language: res.language,
-                sentiment: res.sentiment,
-                priority: res.priority,
+                sentiment: res.sentiment as any,
+                priority: res.priority as any,
                 grounded: res.grounded,
-                citations: res.citations || [],
+                citations: res.citations,
                 whyDecision: res.why_decision,
                 isPendingApproval: res.is_pending_approval
               };
@@ -238,27 +245,27 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
   return (
     <div className="max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-12 gap-6 h-[calc(100vh-100px)] min-h-[680px]">
       {/* LEFT / CENTER: Customer Portal Chat (7 cols) */}
-      <div className="lg:col-span-7 flex flex-col h-full glass-panel rounded-2xl border border-slate-800 overflow-hidden shadow-2xl">
+      <div className="lg:col-span-7 flex flex-col h-full bg-[#F5F5F4] rounded-xl border border-[#D6D3D1] overflow-hidden shadow-xs">
         {/* Chat Header */}
-        <div className="p-4 border-b border-slate-800 bg-slate-900/60 flex items-center justify-between">
+        <div className="p-4 border-b border-[#D6D3D1] bg-[#E7E5E4]/80 flex items-center justify-between">
           <div className="flex items-center space-x-3">
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-sky-500 to-indigo-600 flex items-center justify-center text-white shadow-md shadow-sky-500/20">
+            <div className="w-10 h-10 rounded-xl bg-[#C2410C] flex items-center justify-center text-white shadow-xs">
               <Bot className="w-5 h-5" />
             </div>
             <div>
               <div className="flex items-center space-x-2">
-                <h2 className="text-sm font-bold text-white">SentinelCX</h2>
-                <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-950 border border-emerald-800 text-emerald-300 font-mono flex items-center gap-1">
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                <h2 className="text-sm font-bold text-[#1C1917] font-display">SentinelCX Support</h2>
+                <span className="text-[10px] px-2 py-0.5 rounded-full bg-[#E7E5E4] border border-[#D6D3D1] text-[#16A34A] font-semibold flex items-center gap-1 font-mono">
+                  <span className="w-1.5 h-1.5 rounded-full bg-[#16A34A] animate-pulse" />
                   Active
                 </span>
               </div>
-              <p className="text-[11px] text-slate-400">
-                User: <span className="text-slate-200 font-medium">{currentUser?.name || 'Ananya'}</span> ({currentUser?.email})
+              <p className="text-[11px] text-[#57534E]">
+                User: <span className="text-[#1C1917] font-semibold">{currentUser?.name || 'Ananya'}</span> ({currentUser?.email})
                 {currentUser?.is_verified ? (
-                  <span className="ml-1 text-emerald-400 font-semibold text-[10px]">✓ Verified</span>
+                  <span className="ml-1 text-[#16A34A] font-semibold text-[10px]">✓ Verified</span>
                 ) : (
-                  <span className="ml-1 text-amber-400 font-semibold text-[10px]">⚠ Unverified</span>
+                  <span className="ml-1 text-[#D97706] font-semibold text-[10px]">⚠ Unverified</span>
                 )}
               </p>
             </div>
@@ -268,21 +275,21 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
             <button
               onClick={handleNewSession}
               title="Start a fresh conversation thread"
-              className="p-1.5 rounded-lg bg-slate-800/80 hover:bg-slate-700 text-slate-300 hover:text-white transition-all border border-slate-700 text-xs flex items-center gap-1 cursor-pointer"
+              className="px-3 py-1.5 rounded-lg bg-[#F5F5F4] hover:bg-[#E7E5E4] text-[#57534E] hover:text-[#1C1917] transition-all border border-[#D6D3D1] text-xs font-semibold flex items-center gap-1.5 cursor-pointer shadow-xs"
             >
-              <RefreshCw className="w-3.5 h-3.5" />
+              <RefreshCw className="w-3.5 h-3.5 text-[#C2410C]" />
               <span className="hidden sm:inline">New Thread</span>
             </button>
           </div>
         </div>
 
         {/* Demo Scenario Chips */}
-        <div className="px-4 border-b border-slate-800/60 bg-slate-950/40">
+        <div className="px-4 border-b border-[#D6D3D1] bg-[#F5F5F4]">
           <DemoScenarioChips onSelectScenario={handleSelectScenario} disabled={isProcessing} />
         </div>
 
         {/* Message Thread Scroll Area */}
-        <div className="flex-1 p-4 overflow-y-auto space-y-4">
+        <div className="flex-1 p-4 overflow-y-auto space-y-4 bg-[#FAFAF9]">
           <AnimatePresence initial={false}>
             {messages.map((msg) => (
               <motion.div
@@ -294,28 +301,28 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
               >
                 {/* Bubble */}
                 <div
-                  className={`max-w-[85%] rounded-2xl p-4 text-xs leading-relaxed ${
+                  className={`max-w-[85%] rounded-xl p-4 text-xs leading-relaxed ${
                     msg.sender === 'user'
-                      ? 'bg-gradient-to-r from-sky-600 to-indigo-600 text-white rounded-tr-none shadow-md shadow-sky-500/10'
-                      : 'bg-slate-900/90 text-slate-200 border border-slate-800/90 rounded-tl-none shadow-md'
+                      ? 'bg-[#C2410C] text-white rounded-tr-none shadow-sm'
+                      : 'bg-[#FFFFFF] text-[#1C1917] border border-[#D6D3D1] rounded-tl-none shadow-xs'
                   }`}
                 >
                   {/* Assistant Header Badges */}
                   {msg.sender === 'assistant' && (
-                    <div className="flex flex-wrap items-center gap-1.5 mb-2 pb-2 border-b border-slate-800/80 text-[10px]">
+                    <div className="flex flex-wrap items-center gap-1.5 mb-2 pb-2 border-b border-[#D6D3D1] text-[10px]">
                       {msg.language && (
-                        <span className="px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 font-mono uppercase">
+                        <span className="px-2 py-0.5 rounded-full bg-[#E7E5E4] text-[#57534E] font-mono uppercase font-semibold">
                           {msg.language}
                         </span>
                       )}
                       {msg.priority && (
                         <span
-                          className={`px-1.5 py-0.5 rounded font-medium ${
+                          className={`px-2 py-0.5 rounded-full font-semibold ${
                             msg.priority === 'Critical'
-                              ? 'bg-rose-950 text-rose-300 border border-rose-800'
+                              ? 'bg-[#DC2626]/10 text-[#DC2626] border border-[#DC2626]/30'
                               : msg.priority === 'High'
-                              ? 'bg-amber-950 text-amber-300 border border-amber-800'
-                              : 'bg-slate-800 text-slate-300'
+                              ? 'bg-[#D97706]/10 text-[#D97706] border border-[#D97706]/30'
+                              : 'bg-[#E7E5E4] text-[#57534E]'
                           }`}
                         >
                           {msg.priority} Priority
@@ -323,10 +330,10 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
                       )}
                       {msg.sentiment && msg.sentiment !== 'neutral' && (
                         <span
-                          className={`px-1.5 py-0.5 rounded font-medium ${
+                          className={`px-2 py-0.5 rounded-full font-semibold ${
                             msg.sentiment === 'abusive'
-                              ? 'bg-rose-950 text-rose-300'
-                              : 'bg-amber-950 text-amber-300'
+                              ? 'bg-[#DC2626]/10 text-[#DC2626]'
+                              : 'bg-[#D97706]/10 text-[#D97706]'
                           }`}
                         >
                           {msg.sentiment}
@@ -342,17 +349,17 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
 
                   {/* Pending Approval Amber Notice */}
                   {msg.isPendingApproval && (
-                    <div className="mt-3 p-3 rounded-xl bg-amber-950/60 border border-amber-600/70 text-amber-200">
+                    <div className="mt-3 p-3.5 rounded-lg bg-[#FFFBEB] border border-[#F59E0B] text-[#92400E]">
                       <div className="flex items-center space-x-2 font-bold text-xs mb-1">
-                        <AlertCircle className="w-4 h-4 text-amber-400 animate-pulse" />
+                        <AlertCircle className="w-4 h-4 text-[#F59E0B] animate-pulse" />
                         <span>APPROVAL GATE ACTIVATED (&gt; Rs 2,000)</span>
                       </div>
-                      <p className="text-[11px] text-amber-300/90 leading-relaxed">
+                      <p className="text-[11px] text-[#B45309] leading-relaxed">
                         This high-value transaction has paused execution at the Human-in-the-Loop policy gate. You can inspect the full handoff dossier and approve or decline in the Supervisor Command Center.
                       </p>
                       <button
                         onClick={onNavigateToSupervisor}
-                        className="mt-2.5 px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-black font-bold text-xs flex items-center gap-1.5 shadow-md transition-all cursor-pointer"
+                        className="mt-2.5 px-3 py-1.5 rounded-lg bg-[#C2410C] hover:bg-[#9A3412] text-white font-semibold text-xs flex items-center gap-1.5 shadow-xs transition-all cursor-pointer"
                       >
                         Open Approval Queue in Command Center <ChevronRight className="w-3.5 h-3.5" />
                       </button>
@@ -371,7 +378,7 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
                 </div>
 
                 {/* Timestamp */}
-                <span className="text-[10px] text-slate-500 mt-1 px-1">{msg.timestamp}</span>
+                <span className="text-[10px] text-[#78716C] mt-1 px-1 font-mono">{msg.timestamp}</span>
               </motion.div>
             ))}
           </AnimatePresence>
@@ -381,9 +388,9 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
             <motion.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
-              className="flex items-center space-x-2 text-slate-400 text-xs py-2"
+              className="flex items-center space-x-2 text-[#78716C] text-xs py-2"
             >
-              <div className="w-2 h-2 rounded-full bg-sky-400 animate-ping" />
+              <div className="w-2 h-2 rounded-full bg-[#C2410C] animate-ping" />
               <span>Multi-agent reasoning in progress ({activeNode || 'evaluating'})...</span>
             </motion.div>
           )}
@@ -391,7 +398,7 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
         </div>
 
         {/* Input Bar */}
-        <div className="p-3 border-t border-slate-800 bg-slate-900/70">
+        <div className="p-3 border-t border-[#D6D3D1] bg-[#E7E5E4]/60">
           <form
             onSubmit={(e) => {
               e.preventDefault();
@@ -405,12 +412,12 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
               onChange={(e) => setInputQuery(e.target.value)}
               placeholder="Ask anything in English or Hinglish (e.g. 'ORD-1001 ka refund chahiye', 'policy window', etc.)..."
               disabled={isProcessing}
-              className="flex-1 bg-slate-950/80 border border-slate-700/80 focus:border-sky-500 rounded-xl px-4 py-3 text-xs text-white placeholder-slate-500 focus:outline-none transition-all"
+              className="flex-1 bg-white border border-[#D6D3D1] focus:border-[#C2410C] rounded-lg px-4 py-2.5 text-xs text-[#1C1917] placeholder-[#78716C] focus:outline-none transition-all shadow-xs"
             />
             <button
               type="submit"
               disabled={isProcessing || !inputQuery.trim()}
-              className="px-4 py-3 rounded-xl bg-gradient-to-r from-sky-500 to-indigo-600 hover:from-sky-400 hover:to-indigo-500 disabled:opacity-50 text-white font-semibold text-xs flex items-center gap-1.5 transition-all cursor-pointer"
+              className="px-4 py-2.5 rounded-lg bg-[#C2410C] hover:bg-[#9A3412] disabled:opacity-50 text-white font-semibold text-xs flex items-center gap-1.5 transition-all cursor-pointer shadow-xs hover:shadow-md"
             >
               <Send className="w-4 h-4" />
               <span className="hidden sm:inline">Send</span>
