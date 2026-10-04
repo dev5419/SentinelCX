@@ -292,7 +292,13 @@ def record_refund(
     }
 
 
-def get_audit_logs(limit: int = 100, session: Optional[str] = None, action: Optional[str] = None, db_path: Optional[str] = None) -> List[Dict[str, Any]]:
+def get_audit_logs(
+    limit: int = 100,
+    session: Optional[str] = None,
+    action: Optional[str] = None,
+    db_path: Optional[str] = None,
+    **kwargs
+) -> List[Dict[str, Any]]:
     """Fetches recent audit log entries."""
     target_path = db_path or MOCK_DB_PATH
     init_db(target_path)
@@ -306,7 +312,7 @@ def get_audit_logs(limit: int = 100, session: Optional[str] = None, action: Opti
         if action:
             query += " AND action = ?"
             params.append(action)
-        query += " ORDER BY log_id DESC LIMIT ?"
+        query += " ORDER BY log_id ASC LIMIT ?"
         params.append(limit)
         cursor.execute(query, tuple(params))
         return [dict(r) for r in cursor.fetchall()]
