@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   UserProfile,
   MetricsSummary,
@@ -23,7 +23,7 @@ export function App() {
   const [backendOnline, setBackendOnline] = useState<boolean>(false);
   const [isResetting, setIsResetting] = useState<boolean>(false);
 
-  const refreshSystemData = async () => {
+  const refreshSystemData = useCallback(async () => {
     try {
       const health = await fetchHealth();
       setBackendOnline(health.status === 'ok');
@@ -35,21 +35,20 @@ export function App() {
       ]);
 
       setUsers(usersData);
-      if (!selectedUser && usersData.length > 0) {
-        setSelectedUser(usersData[0]);
-      }
+      setSelectedUser((prev) => prev || (usersData.length > 0 ? usersData[0] : null));
       setMetrics(metricsData);
       setPendingApprovalsCount(approvalsData.length);
     } catch (e) {
+      console.warn('Backend connection unavailable:', e);
       setBackendOnline(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
     refreshSystemData();
     const interval = setInterval(refreshSystemData, 6000);
     return () => clearInterval(interval);
-  }, []);
+  }, [refreshSystemData]);
 
   const handleResetDemo = async () => {
     setIsResetting(true);

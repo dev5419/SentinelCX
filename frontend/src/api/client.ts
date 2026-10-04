@@ -281,21 +281,21 @@ export function subscribeChatStream(
   const eventSource = new EventSource(`${API_BASE_URL}/chat/stream?${params.toString()}`);
 
   eventSource.addEventListener('start', (e: MessageEvent) => {
-    try { onEvent('start', JSON.parse(e.data)); } catch (err) {}
+    try { onEvent('start', JSON.parse(e.data)); } catch {}
   });
 
   eventSource.addEventListener('node_complete', (e: MessageEvent) => {
-    try { onEvent('node_complete', JSON.parse(e.data)); } catch (err) {}
+    try { onEvent('node_complete', JSON.parse(e.data)); } catch {}
   });
 
   eventSource.addEventListener('interrupt', (e: MessageEvent) => {
-    try { onEvent('interrupt', JSON.parse(e.data)); } catch (err) {}
+    try { onEvent('interrupt', JSON.parse(e.data)); } catch {}
   });
 
   eventSource.addEventListener('complete', (e: MessageEvent) => {
     try {
       onEvent('complete', JSON.parse(e.data));
-    } catch (err) {}
+    } catch {}
     eventSource.close();
   });
 

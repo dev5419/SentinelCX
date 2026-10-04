@@ -2,21 +2,13 @@ import React, { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Send,
-  User,
-  Shield,
   Bot,
   AlertCircle,
-  Clock,
-  Sparkles,
   RefreshCw,
-  CheckCircle,
-  ExternalLink,
-  ChevronRight,
-  Package
+  ChevronRight
 } from 'lucide-react';
 import {
   UserProfile,
-  ChatResponse,
   TraceStep,
   WhyDecision,
   sendChatTurn,
@@ -25,7 +17,7 @@ import {
 import { LiveAgentFlow } from '../components/LiveAgentFlow';
 import { EvidenceCard } from '../components/EvidenceCard';
 import { WhyDecisionCard } from '../components/WhyDecisionCard';
-import { DemoScenarioChips, DEMO_SCENARIOS } from '../components/DemoScenarioChips';
+import { DemoScenarioChips } from '../components/DemoScenarioChips';
 
 interface Message {
   id: string;
@@ -57,7 +49,7 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
       id: 'welcome_1',
       sender: 'assistant',
       content: 'Namaste! Welcome to SentinelCX. How can I assist you with your orders, refunds, billing, or account today?',
-      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      timestamp: '10:00 AM',
       action: 'answer',
       language: 'en',
       sentiment: 'neutral',
@@ -76,6 +68,7 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
   const [isCurrentPendingApproval, setIsCurrentPendingApproval] = useState<boolean>(false);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const streamCleanupRef = useRef<(() => void) | null>(null);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -84,6 +77,12 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
   useEffect(() => {
     scrollToBottom();
   }, [messages, isProcessing]);
+
+  useEffect(() => {
+    return () => {
+      streamCleanupRef.current?.();
+    };
+  }, []);
 
   const handleSendMessage = async (textToSend?: string, targetThreadId?: string) => {
     const query = (textToSend || inputQuery).trim();
@@ -109,12 +108,16 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
     setIsCurrentPendingApproval(false);
 
     try {
+      streamCleanupRef.current?.();
+      let eventCount = 0;
+
       // Stream Live Agent Events via SSE for real-time visualization
       const unsubscribe = subscribeChatStream(
         activeThread,
         query,
         currentUser?.user_id || 'user_1',
         (eventType, data) => {
+          eventCount++;
           if (eventType === 'node_complete') {
             setActiveNode(null);
             setCompletedNodes((prev) => new Set([...prev, data.node]));
@@ -127,6 +130,7 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
           } else if (eventType === 'interrupt') {
             setIsCurrentPendingApproval(true);
           } else if (eventType === 'complete') {
+            streamCleanupRef.current = null;
             // Process complete payload
             setCurrentWhyDecision(data.why_decision);
             const isInt = data.action === 'hitl_interrupt' || data.is_pending_approval;
@@ -150,48 +154,57 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
             setIsProcessing(false);
           }
         },
-        async (_err) => {
-          // Fallback to standard REST if SSE connection drops
-          try {
-            const res = await sendChatTurn(activeThread, query, currentUser?.user_id || 'user_1');
-            setCompletedNodes(new Set(res.trace.map((t) => t.node)));
-            setCurrentTrace(res.trace);
-            setCurrentWhyDecision(res.why_decision);
-            setIsCurrentPendingApproval(res.is_pending_approval);
+        async (streamErr) => {
+          streamCleanupRef.current = null;
+          // Only fallback to REST if stream dropped before any events were received
+          if (eventCount === 0) {
+            try {
+              const res = await sendChatTurn(activeThread, query, currentUser?.user_id || 'user_1');
+              setCompletedNodes(new Set(res.trace.map((t) => t.node)));
+              setCurrentTrace(res.trace);
+              setCurrentWhyDecision(res.why_decision);
+              setIsCurrentPendingApproval(res.is_pending_approval);
 
-            const botMsg: Message = {
-              id: `bot_${Date.now()}`,
-              sender: 'assistant',
-              content: res.answer,
-              timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-              action: res.action,
-              language: res.language,
-              sentiment: res.sentiment,
-              priority: res.priority,
-              grounded: res.grounded,
-              citations: res.citations || [],
-              whyDecision: res.why_decision,
-              isPendingApproval: res.is_pending_approval
-            };
-            setMessages((prev) => [...prev, botMsg]);
-          } catch (restErr: any) {
-            setMessages((prev) => [
-              ...prev,
-              {
-                id: `err_${Date.now()}`,
+              const botMsg: Message = {
+                id: `bot_${Date.now()}`,
                 sender: 'assistant',
-                content: `System notification: ${restErr.message || 'Service temporarily unavailable'}`,
+                content: res.answer,
                 timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-                action: 'clarify'
-              }
-            ]);
-          } finally {
+                action: res.action,
+                language: res.language,
+                sentiment: res.sentiment,
+                priority: res.priority,
+                grounded: res.grounded,
+                citations: res.citations || [],
+                whyDecision: res.why_decision,
+                isPendingApproval: res.is_pending_approval
+              };
+              setMessages((prev) => [...prev, botMsg]);
+            } catch (restErr: any) {
+              setMessages((prev) => [
+                ...prev,
+                {
+                  id: `err_${Date.now()}`,
+                  sender: 'assistant',
+                  content: `System notification: ${restErr.message || 'Service temporarily unavailable'}`,
+                  timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                  action: 'clarify'
+                }
+              ]);
+            } finally {
+              setIsProcessing(false);
+              setActiveNode(null);
+            }
+          } else {
+            console.warn('SSE stream interrupted midway:', streamErr);
             setIsProcessing(false);
             setActiveNode(null);
           }
         }
       );
+      streamCleanupRef.current = unsubscribe;
     } catch (e: any) {
+      console.error('Chat turn initiation error:', e);
       setIsProcessing(false);
     }
   };

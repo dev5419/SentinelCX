@@ -3,6 +3,8 @@ import sys
 import json
 import time
 import uuid
+import queue
+import threading
 import asyncio
 from datetime import datetime, timezone, timedelta
 from typing import Dict, Any, List, Optional, Literal, AsyncGenerator
@@ -351,12 +353,32 @@ async def chat_stream(
         final_state = {}
 
         try:
-            # Stream node updates from LangGraph
-            for event in graph.stream(
-                {"user_query": user_query, "user_id": user_id, "session_id": session},
-                config=config,
-                stream_mode="updates"
-            ):
+            # Stream node updates from LangGraph on a worker thread to prevent blocking the asyncio event loop
+            evt_queue: queue.Queue = queue.Queue()
+
+            def _stream_worker():
+                try:
+                    for evt in graph.stream(
+                        {"user_query": user_query, "user_id": user_id, "session_id": session},
+                        config=config,
+                        stream_mode="updates"
+                    ):
+                        evt_queue.put(("event", evt))
+                    evt_queue.put(("done", None))
+                except Exception as ex:
+                    evt_queue.put(("error", ex))
+
+            stream_thread = threading.Thread(target=_stream_worker, daemon=True)
+            stream_thread.start()
+
+            while True:
+                msg_type, payload = await asyncio.to_thread(evt_queue.get)
+                if msg_type == "done":
+                    break
+                if msg_type == "error":
+                    raise payload
+                event = payload
+
                 for node_name, node_update in event.items():
                     if node_name == "__interrupt__":
                         intr_val = {}
@@ -433,7 +455,7 @@ async def chat_stream(
                     await asyncio.sleep(0.05)  # brief pacing for smooth UI animation
 
             # Check if execution paused on interrupt
-            snapshot = graph.get_state(config)
+            snapshot = await asyncio.to_thread(graph.get_state, config)
             if snapshot.next and "hitl_interrupt" in snapshot.next or snapshot.tasks and any(t.interrupts for t in snapshot.tasks):
                 pending_id = f"APPR-{thread_id[:8].upper()}"
                 interrupt_val = snapshot.tasks[0].interrupts[0].value if snapshot.tasks and snapshot.tasks[0].interrupts else {}

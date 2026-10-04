@@ -9,7 +9,7 @@ HINGLISH_VOCAB = {
     "hai", "hain", "ho", "gaya", "gayi", "gaye", "hoga", "hogi", "bhai", "yaar",
     "kripya", "kaise", "kab", "kaha", "kyun", "kyu", "chahiye", "paise", "kat",
     "mila", "milega", "aaya", "aayi", "bhejo", "dedo", "batao", "dekh", "liye",
-    "par", "aur", "tha", "thi", "the", "ek", "do", "bohot", "bahut", "turant",
+    "aur", "tha", "thi", "ek", "bohot", "bahut", "turant",
     "jaldi", "wapas", "kisko", "kisne", "khata", "paisa", "aapka", "humara", "kijiye"
 }
 

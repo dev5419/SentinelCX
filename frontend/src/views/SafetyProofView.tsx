@@ -1,16 +1,12 @@
 import React, { useState, useEffect } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion } from 'framer-motion';
 import {
   ShieldAlert,
   ShieldCheck,
   Play,
-  RotateCcw,
   CheckCircle2,
   XCircle,
-  AlertTriangle,
   Lock,
-  Zap,
-  TrendingUp,
   FileCheck2,
   Terminal,
   Activity,
@@ -18,6 +14,7 @@ import {
   ChevronDown,
   ChevronUp,
   Clock,
+  TrendingUp,
   X
 } from 'lucide-react';
 import {

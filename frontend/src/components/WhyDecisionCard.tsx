@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { HelpCircle, ChevronDown, ChevronUp, Scale, Check, ArrowRight } from 'lucide-react';
+import { ChevronDown, ChevronUp, Scale } from 'lucide-react';
 import { WhyDecision } from '../api/client';
 
 interface WhyDecisionCardProps {

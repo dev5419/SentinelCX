@@ -18,3 +18,5 @@ uvicorn[standard]
 watchfiles
 langgraph
 playwright
+pandas
+pytest

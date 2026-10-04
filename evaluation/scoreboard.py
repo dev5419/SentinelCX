@@ -243,14 +243,15 @@ def run_scoreboard(force: bool = False, print_table: bool = False) -> Dict[str, 
     
     Caches to metrics.json with timestamp; returns cached results if force=False.
     """
-    # 1. Check cache first
+    # 1. Check cache first (only use if PASS)
     if not force and os.path.exists(METRICS_CACHE_PATH):
         try:
             with open(METRICS_CACHE_PATH, "r", encoding="utf-8") as f:
                 cached = json.load(f)
-            if print_table:
-                print_scoreboard_table(cached)
-            return cached
+            if cached.get("status") == "PASS":
+                if print_table:
+                    print_scoreboard_table(cached)
+                return cached
         except Exception:
             pass
 
