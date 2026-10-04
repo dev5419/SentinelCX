@@ -92,30 +92,43 @@ flowchart TB
     M --> DB
     M --> AL
 
-    style S1 fill:#e7f0fb,stroke:#9bbbe0,color:#1f3a5f
-    style S2 fill:#f1eafb,stroke:#bba5e0,color:#3d2a63
-    style S3 fill:#e9f7ee,stroke:#9fd4b0,color:#1f4d2e
-    style S4 fill:#fdecec,stroke:#e8a5a5,color:#6b1f1f
-    style S5 fill:#fff1e3,stroke:#f0c08a,color:#6b3d0a
-    style S6 fill:#eef0f2,stroke:#b5bcc4,color:#2f3640
+    %%{init: {
+            "theme": "base",
+            "themeVariables": {
+            "primaryTextColor": "#000000",
+            "primaryColor": "#ffffff",
+            "lineColor": "#000000",
+            "edgeLabelBackground": "#ffffff"
+        }
+    }}%%
 
-    style A fill:#ffffff,stroke:#5b8bc4
-    style B fill:#ffffff,stroke:#5b8bc4
-    style C fill:#ffffff,stroke:#5b8bc4
-    style X fill:#ffffff,stroke:#5b8bc4
-    style D fill:#ffffff,stroke:#8a6cc4
-    style E fill:#ffffff,stroke:#4fa874
-    style G fill:#ffffff,stroke:#4fa874
-    style I fill:#ffffff,stroke:#4fa874
-    style J fill:#ffffff,stroke:#4fa874
-    style K fill:#ffffff,stroke:#4fa874
-    style H fill:#ffffff,stroke:#cc6666
-    style S fill:#ffffff,stroke:#cc6666
-    style F fill:#ffffff,stroke:#d98c3a
-    style L fill:#ffffff,stroke:#d98c3a
-    style M fill:#ffffff,stroke:#7d8691
-    style DB fill:#ffffff,stroke:#7d8691
-    style AL fill:#ffffff,stroke:#7d8691
+    style S1 fill:#e7f0fb,stroke:#9bbbe0,color:#000000
+    style S2 fill:#f1eafb,stroke:#bba5e0,color:#000000
+    style S3 fill:#e9f7ee,stroke:#9fd4b0,color:#000000
+    style S4 fill:#fdecec,stroke:#e8a5a5,color:#000000
+    style S5 fill:#fff1e3,stroke:#f0c08a,color:#000000
+    style S6 fill:#eef0f2,stroke:#b5bcc4,color:#000000
+
+    style A fill:#ffffff,stroke:#5b8bc4,color:#000000
+    style B fill:#ffffff,stroke:#5b8bc4,color:#000000
+    style C fill:#ffffff,stroke:#5b8bc4,color:#000000
+    style X fill:#ffffff,stroke:#5b8bc4,color:#000000
+    style D fill:#ffffff,stroke:#8a6cc4,color:#000000
+    style E fill:#ffffff,stroke:#4fa874,color:#000000
+    style G fill:#ffffff,stroke:#4fa874,color:#000000
+    style I fill:#ffffff,stroke:#4fa874,color:#000000
+    style J fill:#ffffff,stroke:#4fa874,color:#000000
+    style K fill:#ffffff,stroke:#4fa874,color:#000000
+    style H fill:#ffffff,stroke:#cc6666,color:#000000
+    style S fill:#ffffff,stroke:#cc6666,color:#000000
+    style F fill:#ffffff,stroke:#d98c3a,color:#000000
+    style L fill:#ffffff,stroke:#d98c3a,color:#000000
+    style M fill:#ffffff,stroke:#7d8691,color:#000000
+    style DB fill:#ffffff,stroke:#7d8691,color:#000000
+    style AL fill:#ffffff,stroke:#7d8691,color:#000000
+
+    linkStyle default stroke:#000000,stroke-width:2px,color:#000000
+
 ```
 
 **Three guardrails, zero overlap:**
