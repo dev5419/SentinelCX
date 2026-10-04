@@ -40,9 +40,13 @@ export const Navbar: React.FC<NavbarProps> = ({
           className="flex items-center space-x-3 cursor-pointer group"
           onClick={() => setCurrentTab('landing')}
         >
-          <div className="w-10 h-10 rounded-xl bg-[#C2410C] flex items-center justify-center shadow-md shadow-[#C2410C]/20 group-hover:bg-[#9A3412] transition-all">
-            <Shield className="w-5 h-5 text-white" />
-          </div>
+          <img
+            src="/Logo.png"
+            alt="SentinelCX logo"
+            className="w-10 h-10 object-contain shrink-0"
+            width={40}
+            height={40}
+          />
           <div>
             <div className="flex items-center space-x-2">
               <span className="font-bold text-base tracking-tight text-[#1C1917] group-hover:text-[#C2410C] transition-colors font-display">
