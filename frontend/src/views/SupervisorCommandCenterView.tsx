@@ -496,8 +496,8 @@ export const SupervisorCommandCenterView: React.FC<SupervisorCommandCenterViewPr
                 </tr>
               </thead>
               <tbody className="divide-y divide-[#D6D3D1] font-medium">
-                {filteredTickets.map((t, idx) => (
-                  <tr key={t.ticket_id || `tck-${idx}`} className="hover:bg-[#F5F5F4] transition-colors">
+                {filteredTickets.map((t) => (
+                  <tr key={t.thread_id} className="hover:bg-[#F5F5F4] transition-colors">
                     <td className="py-2.5 px-3 font-mono text-[#57534E]">{t.ticket_id}</td>
                     <td className="py-2.5 px-3 text-[#1C1917] font-semibold">{t.user_name}</td>
                     <td className="py-2.5 px-3">

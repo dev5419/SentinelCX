@@ -5,6 +5,7 @@ import {
   Bot,
   AlertCircle,
   RefreshCw,
+  Clock,
   ChevronRight
 } from 'lucide-react';
 import {
@@ -24,6 +25,7 @@ interface Message {
   sender: 'user' | 'assistant';
   content: string;
   timestamp: string;
+  responseTimeMs?: number;
   action?: 'answer' | 'clarify' | 'reject' | 'escalate' | 'hitl_interrupt';
   language?: string;
   sentiment?: 'positive' | 'neutral' | 'frustrated' | 'abusive';
@@ -88,6 +90,7 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
     const query = (textToSend || inputQuery).trim();
     if (!query || isProcessing) return;
     const activeThread = targetThreadId || threadId;
+    const requestStartedAt = performance.now();
 
     // Append User Message
     const userMsg: Message = {
@@ -150,6 +153,7 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
               id: `bot_${Date.now()}`,
               sender: 'assistant',
               content: data.answer || 'No response generated.',
+              responseTimeMs: performance.now() - requestStartedAt,
               timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
               action: data.action,
               language: data.language,
@@ -190,6 +194,7 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
                 id: `bot_${Date.now()}`,
                 sender: 'assistant',
                 content: res.answer,
+                responseTimeMs: performance.now() - requestStartedAt,
                 timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
                 action: res.action as any,
                 language: res.language,
@@ -410,8 +415,18 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
                   )}
                 </div>
 
-                {/* Timestamp */}
-                <span className="text-[10px] text-[#78716C] mt-1 px-1 font-mono">{msg.timestamp}</span>
+                {/* Timestamp and measured request-to-response duration */}
+                <div className="text-[10px] text-[#78716C] mt-1 px-1 font-mono flex items-center gap-3">
+                  <span>{msg.timestamp}</span>
+                  {msg.responseTimeMs !== undefined && (
+                    <span className="inline-flex items-center gap-1" title="Elapsed time from sending the request to receiving the complete reply, including network time">
+                      <Clock className="w-3 h-3" />
+                      Response time: {msg.responseTimeMs < 1000
+                        ? `${Math.round(msg.responseTimeMs)} ms`
+                        : `${(msg.responseTimeMs / 1000).toFixed(2)} s`}
+                    </span>
+                  )}
+                </div>
               </motion.div>
             ))}
           </AnimatePresence>
