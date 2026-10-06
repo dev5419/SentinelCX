@@ -151,7 +151,7 @@ class SemanticSecurityTests(unittest.TestCase):
                               priority="Medium", is_transactional=False,
                               extracted_order_id="ORD-1005", amount_at_risk=None)
         classify = Mock(return_value=obj)
-        namespace = {"Dict": dict, "Any": object, "mask_pii": self.pii.mask_pii,
+        namespace = {"Dict": dict, "Any": object, "re": re, "mask_pii": self.pii.mask_pii,
                      "_call_llm_for_triage": classify, "_extract_amount_from_query": lambda query: None,
                      "ORDER_ID_REGEX": re.compile(r"\bORD-\d+\b", re.I),
                      "LEGAL_FRAUD_KEYWORDS": [], "ABUSIVE_KEYWORDS": [],

@@ -106,6 +106,28 @@ def init_db(db_path: Optional[str] = None, force_seed: bool = False):
 
         if user_count == 0 or force_seed:
             _seed_data(conn)
+            _ensure_alice_scenarios(conn)
+        elif conn.execute("PRAGMA user_version").fetchone()[0] < 1:
+            _ensure_alice_scenarios(conn)
+
+
+def _ensure_alice_scenarios(conn):
+    """Add missing Alice demo scenarios without resetting existing transactions."""
+    now = datetime.now(timezone.utc)
+    date = lambda days: (now - timedelta(days=days)).strftime("%Y-%m-%d")
+    conn.executemany(
+        "INSERT OR IGNORE INTO orders (order_id,user_id,item_name,amount,currency,status,purchase_date,delivery_date) VALUES (?,?,?,?,?,?,?,?)",
+        [("ORD-1053", "user_1", "Travel Laptop Backpack", 1299.0, "INR", "shipped", date(2), None),
+         ("ORD-1054", "user_1", "USB-C Charging Adapter", 799.0, "INR", "refunded", date(9), date(6)),
+         ("ORD-1055", "user_1", "Smart Desk Lamp", 2499.0, "INR", "cancelled", date(3), None)],
+    )
+    conn.execute(
+        "INSERT OR IGNORE INTO refunds (refund_id,order_id,user_id,amount,reason,status,approved_by,created_at) VALUES (?,?,?,?,?,?,?,?)",
+        ("REF-1054", "ORD-1054", "user_1", 799.0, "Defective adapter", "completed", "system_auto",
+         (now - timedelta(days=4)).strftime("%Y-%m-%d %H:%M:%S")),
+    )
+    conn.execute("PRAGMA user_version = 1")
+    conn.commit()
 
 
 def _seed_data(conn: sqlite3.Connection):

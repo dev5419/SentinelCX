@@ -7,6 +7,9 @@ class SupportState(TypedDict, total=False):
     user_query: str
     user_id: str
     session_id: str
+    conversation_mode: Optional[str]
+    selected_order_id: Optional[str]
+    selected_order: Optional[Dict[str, Any]]
 
     # Sanitization & Security
     sanitized_query: str
@@ -24,6 +27,9 @@ class SupportState(TypedDict, total=False):
     extracted_order_id: Optional[str]
     amount_at_risk: Optional[float]
     sla_deadline: str
+    refund_reason: Optional[str]
+    refund_reason_category: str
+    pending_refund_order_id: Optional[str]
 
     # Policy & HITL
     policy_decision: Optional[Dict[str, Any]]

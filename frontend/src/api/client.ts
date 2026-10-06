@@ -161,6 +161,11 @@ export interface RedteamReport {
   results: RedteamAttackResult[];
 }
 
+export interface ChatContext {
+  conversation_mode: 'order' | 'general';
+  selected_order_id?: string;
+}
+
 export interface CustomAttackRequest {
   user_query: string;
   user_id: 'user_1' | 'user_2' | 'user_3';
@@ -310,12 +315,13 @@ export async function resetDemoState(): Promise<{ status: string; message: strin
 export async function sendChatTurn(
   threadId: string,
   query: string,
-  userId: string = 'user_1'
+  userId: string = 'user_1',
+  context?: ChatContext
 ): Promise<ChatResponse> {
   const res = await fetch(`${API_BASE_URL}/chat`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ thread_id: threadId, user_query: query, user_id: userId }),
+    body: JSON.stringify({ thread_id: threadId, user_query: query, user_id: userId, ...context }),
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: 'Network error' }));
@@ -329,13 +335,18 @@ export function subscribeChatStream(
   query: string,
   userId: string = 'user_1',
   onEvent: (eventType: string, data: any) => void,
-  onError?: (err: any) => void
+  onError?: (err: any) => void,
+  context?: ChatContext
 ): () => void {
   const params = new URLSearchParams({
     thread_id: threadId,
     user_query: query,
     user_id: userId,
   });
+  if (context) {
+    params.set('conversation_mode', context.conversation_mode);
+    if (context.selected_order_id) params.set('selected_order_id', context.selected_order_id);
+  }
 
   const eventSource = new EventSource(`${API_BASE_URL}/chat/stream?${params.toString()}`);
   let closed = false;

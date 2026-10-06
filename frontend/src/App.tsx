@@ -52,7 +52,11 @@ export function App() {
   useEffect(() => {
     refreshSystemData();
     const interval = setInterval(refreshSystemData, 6000);
-    return () => clearInterval(interval);
+    window.addEventListener('sentinel:reviews-updated', refreshSystemData);
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('sentinel:reviews-updated', refreshSystemData);
+    };
   }, [refreshSystemData]);
 
   const handleResetDemo = async () => {

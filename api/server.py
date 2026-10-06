@@ -65,6 +65,7 @@ ACTIVE_TICKETS: Dict[str, Dict[str, Any]] = {}
 PENDING_APPROVALS: Dict[str, Dict[str, Any]] = {}
 APPROVAL_HISTORY: List[Dict[str, Any]] = []
 PII_AUDIT_FEED: List[Dict[str, Any]] = []
+DEMO_USER_IDS = ("user_1", "user_2", "user_3")
 
 
 # ============================================================================
@@ -74,8 +75,10 @@ PII_AUDIT_FEED: List[Dict[str, Any]] = []
 class ChatRequest(BaseModel):
     thread_id: str = Field(default_factory=lambda: f"thread_{uuid.uuid4().hex[:8]}")
     user_query: str
-    user_id: str = "user_1"
+    user_id: Literal["user_1", "user_2", "user_3"] = "user_1"
     session_id: Optional[str] = None
+    conversation_mode: Optional[Literal["order", "general"]] = None
+    selected_order_id: Optional[str] = None
 
 
 class CustomAttackRequest(BaseModel):
@@ -222,6 +225,8 @@ def _seed_initial_tickets_and_approvals():
     ]
 
     for p in pending_items:
+        if p["user_id"] not in DEMO_USER_IDS:
+            continue
         PENDING_APPROVALS[p["thread_id"]] = p
 
     # 2. Seed Approved & Rejected History Problems
@@ -319,6 +324,8 @@ def _seed_initial_tickets_and_approvals():
     ]
 
     for item in approved_rejected_samples:
+        if item["user_id"] not in DEMO_USER_IDS:
+            continue
         APPROVAL_HISTORY.append(item)
 
     # 3. Seed corresponding Active Tickets
@@ -489,6 +496,8 @@ def _seed_initial_tickets_and_approvals():
     ]
 
     for t in demo_tickets:
+        if t["user_id"] not in DEMO_USER_IDS:
+            continue
         ACTIVE_TICKETS[t["thread_id"]] = t
 
 
@@ -507,6 +516,42 @@ def _sanitize_for_export(obj: Any) -> Any:
     return obj
 
 
+def _register_human_review(thread_id, user_id, query, state, interrupt_payload=None):
+    """Publish a real handoff before reporting it as pending to the customer."""
+    interrupted = interrupt_payload is not None or state.get("action") == "hitl_interrupt"
+    payload = interrupt_payload or {}
+    dossier = payload.get("dossier") or state.get("handoff_dossier") or {}
+    why = payload.get("why_decision") or state.get("why_decision") or {}
+    user = get_user(user_id) or {}
+    now = datetime.now(timezone.utc).isoformat()
+    existing = PENDING_APPROVALS.get(thread_id, {})
+    # Use the entire thread identity: every thread_* previously shared ESC-THREAD.
+    prefix = "APPR" if interrupted else "ESC"
+    approval_id = existing.get("approval_id") or f"{prefix}-{uuid.uuid5(uuid.NAMESPACE_URL, thread_id).hex[:12].upper()}"
+    order_id = state.get("extracted_order_id") or state.get("selected_order_id") or "General Support"
+    amount = float(state.get("amount_at_risk") or dossier.get("amount") or dossier.get("proposed_amount") or 0.0)
+    reason = payload.get("message") or state.get("answer") or "Human review is required."
+    item = _sanitize_for_export({
+        "approval_id": approval_id, "thread_id": thread_id, "order_id": order_id,
+        "amount": amount, "user_id": user_id, "user_name": user.get("name", user_id),
+        "type": "refund_approval" if interrupted else "escalation", "status": "pending",
+        "reason": reason, "query": query, "dossier": dossier, "why_decision": why,
+        "created_at": existing.get("created_at", now),
+    })
+    PENDING_APPROVALS[thread_id] = item
+    ACTIVE_TICKETS[thread_id] = _sanitize_for_export({
+        "ticket_id": f"TCK-{uuid.uuid5(uuid.NAMESPACE_URL, thread_id).hex[:12].upper()}",
+        "thread_id": thread_id, "user_id": user_id, "user_name": item["user_name"],
+        "query": query, "action": "hitl_interrupt" if interrupted else "escalate",
+        "intent": state.get("intent", "unknown"), "priority": state.get("priority", "Medium"),
+        "sentiment": state.get("sentiment", "neutral"), "status": "pending_approval",
+        "sla_deadline": state.get("sla_deadline") or (datetime.now(timezone.utc) + timedelta(minutes=30)).isoformat(),
+        "created_at": ACTIVE_TICKETS.get(thread_id, {}).get("created_at", now),
+        "updated_at": now, "amount_at_risk": amount,
+    })
+    return item
+
+
 # ============================================================================
 # API Endpoints
 # ============================================================================
@@ -514,6 +559,31 @@ def _sanitize_for_export(obj: Any) -> Any:
 @app.get("/health")
 def health():
     return {"status": "ok", "timestamp": datetime.now(timezone.utc).isoformat(), "version": "2.0.0"}
+
+
+def _prepare_chat_input(thread_id, query, user_id, session, mode=None, selected_order_id=None):
+    if not get_user(user_id):
+        raise HTTPException(status_code=401, detail="Customer account unavailable. Please select a valid user.")
+    previous = graph.get_state({"configurable": {"thread_id": thread_id}}).values or {}
+    if previous and (previous.get("user_id") != user_id or
+                     previous.get("conversation_mode") != mode or
+                     previous.get("selected_order_id") != selected_order_id):
+        raise HTTPException(status_code=409, detail="Start a new conversation to change the customer or selected order.")
+    order = None
+    mentioned = {match.upper() for match in re.findall(r"\bORD[-_]\w+\b", query, re.I)}
+    if mode == "order":
+        order = get_order(selected_order_id) if selected_order_id else None
+        if not order or order.get("user_id") != user_id:
+            raise HTTPException(status_code=404, detail="No order accessible to this account was found.")
+        if mentioned - {selected_order_id.upper()}:
+            raise HTTPException(status_code=422, detail="This conversation is for the selected order. Select another order to discuss it.")
+    elif mode == "general" and (selected_order_id or mentioned):
+        raise HTTPException(status_code=422, detail="Select an order to discuss an order-specific request.")
+    elif selected_order_id:
+        raise HTTPException(status_code=422, detail="Select order conversation mode.")
+    return {"user_query": query, "user_id": user_id, "session_id": session,
+            "conversation_mode": mode, "selected_order_id": selected_order_id,
+            "selected_order": order}
 
 
 @app.post("/chat", response_model=ChatResponse)
@@ -524,17 +594,18 @@ def chat_turn(req: ChatRequest):
     """
     session_id = req.session_id or f"session_{req.thread_id}"
     config = {"configurable": {"thread_id": req.thread_id}}
+    chat_input = _prepare_chat_input(req.thread_id, req.user_query, req.user_id, session_id,
+                                    req.conversation_mode, req.selected_order_id)
 
     t0 = time.perf_counter()
     try:
         res = graph.invoke(
-            {
-                "user_query": req.user_query,
-                "user_id": req.user_id,
-                "session_id": session_id
-            },
+            chat_input,
             config=config
         )
+    except GraphInterrupt:
+        snapshot = graph.get_state(config)
+        res = dict(snapshot.values or {})
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Graph execution failed: {str(e)}")
 
@@ -542,7 +613,12 @@ def chat_turn(req: ChatRequest):
 
     # Check for HITL interrupt state
     interrupt_data = res.get("__interrupt__")
-    is_interrupted = bool(interrupt_data)
+    snapshot = graph.get_state(config)
+    if not interrupt_data and snapshot:
+        interrupt_data = [intr for task in getattr(snapshot, "tasks", ())
+                          for intr in getattr(task, "interrupts", ())]
+    is_interrupted = bool(interrupt_data) or res.get("action") == "hitl_interrupt"
+    is_interrupted = is_interrupted or bool(getattr(snapshot, "next", ()))
     pending_approval_id = None
 
     action = res.get("action", "answer")
@@ -553,44 +629,13 @@ def chat_turn(req: ChatRequest):
     user_name = usr.get("name", req.user_id) if usr else req.user_id
 
     if is_pending:
-        pending_approval_id = (
-            f"APPR-{req.thread_id[:8].upper()}" if is_interrupted else f"ESC-{req.thread_id[:6].upper()}"
-        )
-        if is_interrupted:
-            action = "hitl_interrupt"
-            intr_obj = interrupt_data[0].value if interrupt_data else {}
-            dossier = intr_obj.get("dossier", {})
-            why_dec = intr_obj.get("why_decision", res.get("why_decision", {}))
-            reason = intr_obj.get("message", "High-value transaction requires supervisor approval")
-            req_type = "refund_approval"
-        else:
-            dossier = res.get("handoff_dossier") or {
-                "issue": req.user_query,
-                "proposed_action": "Supervisor intervention & customer callback"
-            }
-            why_dec = res.get("why_decision") or {
-                "intent": res.get("intent", "general_inquiry"),
-                "final_route": "human_escalation",
-                "reason": "Customer problem escalated for human assistant"
-            }
-            reason = res.get("answer") or f"Customer problem escalated for human assistant: {req.user_query}"
-            req_type = "escalation"
-
-        PENDING_APPROVALS[req.thread_id] = {
-            "approval_id": pending_approval_id,
-            "thread_id": req.thread_id,
-            "order_id": res.get("extracted_order_id") or "General Support",
-            "amount": float(res.get("amount_at_risk") or 0.0),
-            "user_id": req.user_id,
-            "user_name": user_name,
-            "type": req_type,
-            "status": "pending",
-            "reason": reason,
-            "query": req.user_query,
-            "dossier": dossier,
-            "why_decision": why_dec,
-            "created_at": datetime.now(timezone.utc).isoformat()
-        }
+        action = "hitl_interrupt" if is_interrupted else "escalate"
+        intr_obj = interrupt_data[0] if interrupt_data else None
+        intr_val = getattr(intr_obj, "value", intr_obj)
+        item = _register_human_review(req.thread_id, req.user_id, req.user_query, {**chat_input, **res},
+                                      intr_val if isinstance(intr_val, dict) else ({} if is_interrupted else None))
+        pending_approval_id = item["approval_id"]
+        dossier, why_dec = item["dossier"], item["why_decision"]
     else:
         why_dec = res.get("why_decision") or {}
         dossier = res.get("handoff_dossier")
@@ -619,30 +664,31 @@ def chat_turn(req: ChatRequest):
         )
     )
 
-    ACTIVE_TICKETS[req.thread_id] = {
-        "ticket_id": f"TCK-{req.thread_id[:6].upper()}",
-        "thread_id": req.thread_id,
-        "user_id": req.user_id,
-        "user_name": user_name,
-        "query": req.user_query,
-        "action": action,
-        "intent": res.get("intent", "unknown"),
-        "priority": res.get("priority", "Medium"),
-        "sentiment": res.get("sentiment", "neutral"),
-        "status": ticket_status,
-        "sla_deadline": res.get("sla_deadline") or (datetime.now(timezone.utc) + timedelta(minutes=30)).isoformat(),
-        "created_at": ACTIVE_TICKETS.get(req.thread_id, {}).get("created_at", datetime.now(timezone.utc).isoformat()),
-        "updated_at": datetime.now(timezone.utc).isoformat(),
-        "amount_at_risk": float(res.get("amount_at_risk") or 0.0)
-    }
+    if not is_pending:
+        ACTIVE_TICKETS[req.thread_id] = {
+            "ticket_id": f"TCK-{uuid.uuid5(uuid.NAMESPACE_URL, req.thread_id).hex[:12].upper()}",
+            "thread_id": req.thread_id,
+            "user_id": req.user_id,
+            "user_name": user_name,
+            "query": req.user_query,
+            "action": action,
+            "intent": res.get("intent", "unknown"),
+            "priority": res.get("priority", "Medium"),
+            "sentiment": res.get("sentiment", "neutral"),
+            "status": ticket_status,
+            "sla_deadline": res.get("sla_deadline") or (datetime.now(timezone.utc) + timedelta(minutes=30)).isoformat(),
+            "created_at": ACTIVE_TICKETS.get(req.thread_id, {}).get("created_at", datetime.now(timezone.utc).isoformat()),
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+            "amount_at_risk": float(res.get("amount_at_risk") or 0.0)
+        }
 
     # Build clean sanitized response
     answer_text = res.get("answer", "")
     if is_interrupted:
         answer_text = (
-            "Aapka refund request high value (> Rs 2,000) hone ke kaaran supervisor review ke liye forward kar diya gaya hai. Kripya thoda prateeksha karein."
+            "Aapka refund request Command Center mein supervisor review ke liye pending hai. Abhi refund process nahi hua hai."
             if res.get("language") == "hinglish" else
-            "Your refund request exceeds our automated processing threshold (> Rs 2,000) and has been routed to our supervisor approval queue. A supervisor is reviewing your request now."
+            "Your refund request is awaiting human review in the Command Center approval queue. No refund has been processed."
         )
 
     response_payload = ChatResponse(
@@ -676,8 +722,10 @@ def chat_turn(req: ChatRequest):
 async def chat_stream(
     thread_id: str = Query(...),
     user_query: str = Query(...),
-    user_id: str = Query("user_1"),
-    session_id: Optional[str] = Query(None)
+    user_id: Literal["user_1", "user_2", "user_3"] = Query("user_1"),
+    session_id: Optional[str] = Query(None),
+    conversation_mode: Optional[Literal["order", "general"]] = Query(None),
+    selected_order_id: Optional[str] = Query(None)
 ):
     """
     Server-Sent Events (SSE) streaming endpoint.
@@ -686,13 +734,16 @@ async def chat_stream(
     """
     session = session_id or f"session_{thread_id}"
     config = {"configurable": {"thread_id": thread_id}}
+    chat_input = _prepare_chat_input(thread_id, user_query, user_id, session,
+                                    conversation_mode, selected_order_id)
 
     async def sse_generator() -> AsyncGenerator[str, None]:
         # Emit initial start event
         yield f"event: start\ndata: {json.dumps(_sanitize_for_export({'thread_id': thread_id, 'query': user_query}))}\n\n"
 
         accumulated_trace = []
-        final_state = {}
+        final_state = dict(chat_input)
+        observed_interrupt = None
 
         try:
             # Stream node updates from LangGraph on a worker thread to prevent blocking the asyncio event loop
@@ -701,7 +752,7 @@ async def chat_stream(
             def _stream_worker():
                 try:
                     for evt in graph.stream(
-                        {"user_query": user_query, "user_id": user_id, "session_id": session},
+                        chat_input,
                         config=config,
                         stream_mode="updates"
                     ):
@@ -733,47 +784,9 @@ async def chat_stream(
                         elif isinstance(node_update, dict):
                             intr_val = node_update
 
-                        pending_id = f"APPR-{thread_id[:8].upper()}"
-                        order_id = final_state.get("extracted_order_id") or "ORD-1005"
-                        amount = float(final_state.get("amount_at_risk") or 15000.0)
-                        dossier = intr_val.get("dossier", {})
-                        why_dec = intr_val.get("why_decision", {})
-
-                        u_record = get_user(user_id)
-                        u_name = u_record.get("name", user_id) if u_record else user_id
-
-                        PENDING_APPROVALS[thread_id] = {
-                            "approval_id": pending_id,
-                            "thread_id": thread_id,
-                            "order_id": order_id,
-                            "amount": amount,
-                            "user_id": user_id,
-                            "user_name": u_name,
-                            "type": "refund_approval",
-                            "status": "pending",
-                            "reason": intr_val.get("message", f"Refund of Rs {amount:.2f} for {order_id} requires supervisor approval."),
-                            "query": user_query,
-                            "dossier": dossier,
-                            "why_decision": why_dec,
-                            "created_at": datetime.now(timezone.utc).isoformat()
-                        }
-
-                        ACTIVE_TICKETS[thread_id] = {
-                            "ticket_id": f"TCK-{thread_id[:6].upper()}",
-                            "thread_id": thread_id,
-                            "user_id": user_id,
-                            "user_name": u_name,
-                            "query": user_query,
-                            "action": "hitl_interrupt",
-                            "intent": final_state.get("intent", "refund_request"),
-                            "priority": "Critical",
-                            "sentiment": "frustrated",
-                            "status": "pending_approval",
-                            "sla_deadline": (datetime.now(timezone.utc) + timedelta(minutes=15)).isoformat(),
-                            "created_at": datetime.now(timezone.utc).isoformat(),
-                            "updated_at": datetime.now(timezone.utc).isoformat(),
-                            "amount_at_risk": amount
-                        }
+                        observed_interrupt = intr_val
+                        item = _register_human_review(thread_id, user_id, user_query, final_state, intr_val)
+                        pending_id = item["approval_id"]
 
                         yield f"event: interrupt\ndata: {json.dumps(_sanitize_for_export({'thread_id': thread_id, 'approval_id': pending_id, 'interrupt': intr_val}))}\n\n"
                         continue
@@ -813,7 +826,7 @@ async def chat_stream(
                 final_state.update(res)
 
             action = res.get("action", final_state.get("action", "answer"))
-            is_int = bool(snapshot.next) if snapshot else False
+            is_int = observed_interrupt is not None or action == "hitl_interrupt" or (bool(snapshot.next) if snapshot else False)
             if not is_int and snapshot and snapshot.tasks:
                 is_int = any(bool(getattr(t, "interrupts", None)) for t in snapshot.tasks)
 
@@ -824,52 +837,23 @@ async def chat_stream(
             user_name = usr.get("name", user_id) if usr else user_id
             order_id = res.get("extracted_order_id") or final_state.get("extracted_order_id") or "General Support"
             amount = float(res.get("amount_at_risk") or final_state.get("amount_at_risk") or 0.0)
-            pending_id = (
-                f"APPR-{thread_id[:8].upper()}" if is_int else (f"ESC-{thread_id[:6].upper()}" if is_escalated else None)
-            )
-
-            if is_pending and thread_id not in PENDING_APPROVALS:
-                interrupt_val = {}
-                if snapshot and snapshot.tasks and snapshot.tasks[0].interrupts:
-                    intr_raw = snapshot.tasks[0].interrupts[0].value
-                    interrupt_val = intr_raw if isinstance(intr_raw, dict) else {}
-
-                if is_int:
-                    dossier = interrupt_val.get("dossier") or res.get("handoff_dossier") or {}
-                    why_dec = interrupt_val.get("why_decision") or res.get("why_decision") or {}
-                    reason = interrupt_val.get("message") or f"Refund of Rs {amount:.2f} for {order_id} requires supervisor approval."
-                    req_type = "refund_approval"
-                else:
-                    dossier = res.get("handoff_dossier") or {
-                        "issue": user_query,
-                        "proposed_action": "Supervisor intervention & customer callback"
-                    }
-                    why_dec = res.get("why_decision") or {
-                        "intent": res.get("intent", "general_inquiry"),
-                        "final_route": "human_escalation",
-                        "reason": "Customer problem escalated for human assistant"
-                    }
-                    reason = res.get("answer") or f"Customer problem escalated for human assistant: {user_query}"
-                    req_type = "escalation"
-
-                PENDING_APPROVALS[thread_id] = {
-                    "approval_id": pending_id,
-                    "thread_id": thread_id,
-                    "order_id": order_id,
-                    "amount": amount,
-                    "user_id": user_id,
-                    "user_name": user_name,
-                    "type": req_type,
-                    "status": "pending",
-                    "reason": reason,
-                    "query": user_query,
-                    "dossier": dossier,
-                    "why_decision": why_dec,
-                    "created_at": datetime.now(timezone.utc).isoformat()
-                }
-
-                if is_int:
-                    yield f"event: interrupt\ndata: {json.dumps(_sanitize_for_export({'thread_id': thread_id, 'approval_id': pending_id, 'interrupt': interrupt_val}))}\n\n"
+            pending_id = None
+            if is_pending:
+                interrupt_val = observed_interrupt
+                if interrupt_val is None and snapshot:
+                    for task in getattr(snapshot, "tasks", ()):
+                        for intr in getattr(task, "interrupts", ()):
+                            value = getattr(intr, "value", {})
+                            if isinstance(value, dict):
+                                interrupt_val = value
+                                break
+                        if interrupt_val is not None:
+                            break
+                item = _register_human_review(thread_id, user_id, user_query, final_state,
+                                              (interrupt_val or {}) if is_int else None)
+                pending_id = item["approval_id"]
+                if is_int and observed_interrupt is None:
+                    yield f"event: interrupt\ndata: {json.dumps(_sanitize_for_export({'thread_id': thread_id, 'approval_id': pending_id, 'interrupt': interrupt_val or {}}))}\n\n"
 
             # Always update ACTIVE_TICKETS for every completed stream turn
             ticket_status = "pending_approval" if is_pending else (
@@ -877,29 +861,30 @@ async def chat_stream(
                     "open" if action == "clarify" else "resolved"
                 )
             )
-            ACTIVE_TICKETS[thread_id] = {
-                "ticket_id": f"TCK-{thread_id[:6].upper()}",
-                "thread_id": thread_id,
-                "user_id": user_id,
-                "user_name": user_name,
-                "query": user_query,
-                "action": "hitl_interrupt" if is_int else action,
-                "intent": res.get("intent", final_state.get("intent", "unknown")),
-                "priority": res.get("priority", final_state.get("priority", "Medium")),
-                "sentiment": res.get("sentiment", final_state.get("sentiment", "neutral")),
-                "status": ticket_status,
-                "sla_deadline": res.get("sla_deadline") or (datetime.now(timezone.utc) + timedelta(minutes=30)).isoformat(),
-                "created_at": ACTIVE_TICKETS.get(thread_id, {}).get("created_at", datetime.now(timezone.utc).isoformat()),
-                "updated_at": datetime.now(timezone.utc).isoformat(),
-                "amount_at_risk": amount
-            }
+            if not is_pending:
+                ACTIVE_TICKETS[thread_id] = {
+                    "ticket_id": f"TCK-{uuid.uuid5(uuid.NAMESPACE_URL, thread_id).hex[:12].upper()}",
+                    "thread_id": thread_id,
+                    "user_id": user_id,
+                    "user_name": user_name,
+                    "query": user_query,
+                    "action": "hitl_interrupt" if is_int else action,
+                    "intent": res.get("intent", final_state.get("intent", "unknown")),
+                    "priority": res.get("priority", final_state.get("priority", "Medium")),
+                    "sentiment": res.get("sentiment", final_state.get("sentiment", "neutral")),
+                    "status": ticket_status,
+                    "sla_deadline": res.get("sla_deadline") or (datetime.now(timezone.utc) + timedelta(minutes=30)).isoformat(),
+                    "created_at": ACTIVE_TICKETS.get(thread_id, {}).get("created_at", datetime.now(timezone.utc).isoformat()),
+                    "updated_at": datetime.now(timezone.utc).isoformat(),
+                    "amount_at_risk": amount
+                }
 
             final_answer = res.get("answer", final_state.get("answer", ""))
             if is_int:
                 final_answer = (
-                    "Aapka refund request high value (> Rs 2,000) hone ke kaaran supervisor review ke liye forward kar diya gaya hai."
+                    "Aapka refund request Command Center mein supervisor review ke liye pending hai. Abhi refund process nahi hua hai."
                     if res.get("language") == "hinglish" else
-                    "Your refund request exceeds our automated limit (> Rs 2,000) and is awaiting supervisor approval."
+                    "Your refund request is awaiting human review in the Command Center approval queue. No refund has been processed."
                 )
 
             complete_payload = {
@@ -913,7 +898,7 @@ async def chat_stream(
                 "language": res.get("language", final_state.get("language", "en")),
                 "grounded": res.get("grounded", final_state.get("grounded")),
                 "citations": res.get("retrieved_docs", final_state.get("retrieved_docs", [])),
-                "why_decision": res.get("why_decision", final_state.get("why_decision", {})),
+                "why_decision": item["why_decision"] if is_pending else res.get("why_decision", final_state.get("why_decision", {})),
                 "trace": res.get("trace", accumulated_trace),
                 "is_pending_approval": is_pending,
                 "pending_approval_id": pending_id
@@ -1479,7 +1464,7 @@ def get_demo_users():
     Returns seeded users with their associated orders for the UI demo-user switcher.
     """
     users_data = []
-    user_ids = ["user_1", "user_2", "user_3", "user_4"]
+    user_ids = DEMO_USER_IDS
     for uid in user_ids:
         u = get_user(uid)
         if u:

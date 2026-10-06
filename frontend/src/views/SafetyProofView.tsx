@@ -239,9 +239,9 @@ const InteractiveSandbox: React.FC = () => {
         <label className="text-sm font-medium">User persona
           <select value={persona} disabled={running} onChange={e => setPersona(e.target.value as CustomAttackRequest['user_id'])}
             className="block w-full mt-1 border border-[#D6D3D1] rounded-lg p-2 bg-white">
-            <option value="user_1">Alice · user_1 · Verified</option>
-            <option value="user_2">Bob · user_2 · Verified</option>
-            <option value="user_3">Charlie · user_3 · Unverified</option>
+            <option value="user_1">Alice Johnson · user_1 · Verified</option>
+            <option value="user_2">Bob Smith · user_2 · Verified</option>
+            <option value="user_3">Charlie Davis · user_3 · Unverified</option>
           </select>
         </label>
         <label className="text-sm font-medium">Order ID (optional)

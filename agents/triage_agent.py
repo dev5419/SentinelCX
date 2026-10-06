@@ -39,6 +39,9 @@ class TriageOutput(BaseModel):
     is_transactional: bool = False
     extracted_order_id: Optional[str] = None
     amount_at_risk: Optional[float] = None
+    refund_reason: Optional[str] = None
+    refund_reason_category: Literal["damaged", "defective", "wrong_item", "changed_mind", "missing_delivery", "billing_issue", "other", "unclear"] = "unclear"
+    refund_reason_confidence: float = Field(default=0.0, ge=0.0, le=1.0)
 
     @field_validator("intent", mode="before")
     def normalize_intent(cls, v):
@@ -141,6 +144,9 @@ Return a JSON object with EXACTLY these fields:
 - "is_transactional": boolean (true for refunds, billing disputes, subscription cancellations, order actions; false for FAQs, login help, general inquiries)
 - "extracted_order_id": string (e.g. "ORD-1001", "ORD-501" or null if no order ID in query)
 - "amount_at_risk": number (e.g. 15000 or null if no amount stated)
+- "refund_reason": exact short quote from the CURRENT query explaining why a refund is wanted, or null. Never invent a reason or copy one from history. A bare request such as 'refund me the amount', an order ID, 'yes', or urgency alone has NO reason.
+- "refund_reason_category": one of ["damaged", "defective", "wrong_item", "changed_mind", "missing_delivery", "billing_issue", "other", "unclear"]. Understand English and Hinglish paraphrases. A policy question is not consent to a refund. If awaiting a refund reason, an actual reason such as 'it arrived broken' is a refund_request; unrelated questions or withdrawing the request are not.
+- "refund_reason_confidence": float between 0.0 and 1.0
 
 {history_context if history_context else ""}
 {"ERROR IN PREVIOUS ATTEMPT: " + error_context if error_context else ""}
@@ -255,10 +261,13 @@ def triage_agent(state: Dict[str, Any]) -> Dict[str, Any]:
     history = state.get("history", [])
     recent_turns = history[-4:] if history else []
     history_context = ""
+    pending_order = state.get("pending_refund_order_id")
     if recent_turns:
         history_context = "\nRecent Conversation Turns:\n" + "\n".join(
             f"{t.get('role', 'user').capitalize()}: {mask_pii(t.get('content', ''))['sanitized_query']}" for t in recent_turns
         )
+    if pending_order:
+        history_context += "\nThe customer was asked for a refund reason. Resume only if the current query supplies a reason for that same order."
 
     # 1. Call LLM (with 1 retry on parse failure)
     triage_obj = _call_llm_for_triage(query, history_context=history_context)
@@ -276,7 +285,7 @@ def triage_agent(state: Dict[str, Any]) -> Dict[str, Any]:
     # 2. Extract or confirm Order ID from query using precise regex
     # Model output cannot invent a transaction target absent from the input.
     order_match = ORDER_ID_REGEX.search(query)
-    order_id = order_match.group(0).upper() if order_match else None
+    order_id = order_match.group(0).upper() if order_match else state.get("selected_order_id") or pending_order
     triage_obj.extracted_order_id = order_id
 
     # 3. Determine Amount at Risk (from query or mock_db order record)
@@ -322,15 +331,57 @@ def triage_agent(state: Dict[str, Any]) -> Dict[str, Any]:
             "kitne din", "kab tak", "timeline", "window for"
         ]
     )
-    if is_faq and not order_id and not any(k in q_lower for k in ["chahiye", "kardo", "please refund", "my refund", "refund now", "charged twice"]):
+    if is_faq and (not order_id or state.get("conversation_mode") == "order") and not any(k in q_lower for k in ["chahiye", "kardo", "please refund", "my refund", "refund now", "charged twice"]):
         triage_obj.intent = "faq"
         is_transactional = False
-    elif triage_obj.intent in ["refund_request", "billing_dispute"] or order_id is not None:
+    elif triage_obj.intent in ["refund_request", "billing_dispute"]:
         is_transactional = True
     else:
         is_transactional = triage_obj.is_transactional
 
+    if state.get("conversation_mode") == "general" and is_transactional:
+        return {"intent": triage_obj.intent, "intent_confidence": triage_obj.intent_confidence,
+                "is_transactional": False, "action": "clarify",
+                "answer": "Please select an order from the order list to request a refund or return.",
+                "sentiment": triage_obj.sentiment, "priority": priority, "sla_deadline": sla_deadline,
+                "extracted_order_id": None, "amount_at_risk": None}
+
+    reason, category = (None, "unclear")
+    withdrew_refund = bool(re.search(r"\b(?:do not|don't|dont|cancel|stop)\s+(?:the\s+|my\s+)?refund|\brefund\s+(?:mat|nahi)\b", query, re.I))
+    if (triage_obj.intent in {"refund_request", "billing_dispute"} or pending_order) and not is_faq and not withdrew_refund:
+        reason, category = _refund_reason_from_query(query, triage_obj)
+    if withdrew_refund:
+        triage_obj.intent = "unknown"
+        is_transactional = False
+    continuing_refund = bool(pending_order and pending_order == order_id and reason and not is_faq)
+    if continuing_refund:
+        triage_obj.intent = "refund_request"
+        is_transactional = True
+    refund_request = triage_obj.intent in {"refund_request", "billing_dispute"} and is_transactional
+    result = {
+        "refund_reason": reason if refund_request else None,
+        "refund_reason_category": category if refund_request else "unclear",
+        "pending_refund_order_id": None,
+        "why_decision": None,
+        "policy_decision": None,
+    }
+    if refund_request and not reason:
+        reason_question = ("Is order ka refund kyun chahiye? Kya product damaged, kharab, ya galat item tha?"
+                           if state.get("language") == "hinglish" else
+                           "What is the reason for requesting a refund for this order? For example, was it damaged, faulty, or the wrong item?")
+        result.update({"action": "clarify", "answer": reason_question,
+                       "pending_refund_order_id": order_id, "policy_decision": None,
+                       "why_decision": {"intent": "refund_request", "confidence": triage_obj.intent_confidence,
+                                        "policy_rule": "Refund reason required", "final_route": "clarify",
+                                        "reason": "No clear refund reason was provided. No refund has been processed."}})
+    # Keep pending context across informational questions, but never reuse a previous reason.
+    elif pending_order == order_id and is_faq:
+        result["pending_refund_order_id"] = pending_order
+    if withdrew_refund:
+        result.update({"action": "clarify", "answer": "Your refund request has been stopped. No refund will be processed."})
+
     return {
+        **result,
         "intent": triage_obj.intent,
         "intent_confidence": triage_obj.intent_confidence,
         "sentiment": triage_obj.sentiment,
@@ -340,3 +391,30 @@ def triage_agent(state: Dict[str, Any]) -> Dict[str, Any]:
         "amount_at_risk": amount_at_risk,
         "sla_deadline": sla_deadline
     }
+
+
+def _refund_reason_from_query(query: str, classification: Any):
+    """Use a grounded semantic reason, with conservative offline fallback."""
+    reason = getattr(classification, "refund_reason", None)
+    category = getattr(classification, "refund_reason_category", "unclear")
+    confidence = getattr(classification, "refund_reason_confidence", 0.0)
+    categories = {"damaged", "defective", "wrong_item", "changed_mind", "missing_delivery", "billing_issue", "other"}
+    if (isinstance(reason, str) and reason.strip() and reason.strip().casefold() in query.casefold()
+            and category in categories and confidence >= 0.85):
+        return reason.strip()[:500], category
+    # If semantic classification fails, hold vague requests rather than inventing a reason.
+    patterns = {
+        "damaged": r"\b(?:arrived broken|arrived damaged|received a damaged|item is damaged|product is damaged|toota hua|tuta hua)\b",
+        "defective": r"\b(?:does not work|doesn't work|not working|stopped working|doesn't charge|does not charge|kaam nahi kar|kharab hai)\b",
+        "wrong_item": r"\b(?:received the wrong|wrong item|wrong product|galat item|galat product)\b",
+        "changed_mind": r"\b(?:changed my mind|no longer need|ab nahi chahiye)\b",
+        "missing_delivery": r"\b(?:never arrived|not arrived|not received|nahi mila|deliver nahi hua)\b",
+        "billing_issue": r"\b(?:charged twice|double charged|deducted twice|do baar)\b",
+    }
+    if re.search(r"\b(?:not|never)\s+(?:broken|damaged|faulty|defective|the wrong|a wrong|wrong)\b|\b(?:what|how|policy|if|suppose)\b", query, re.I):
+        return None, "unclear"
+    for candidate, pattern in patterns.items():
+        match = re.search(pattern, query, re.I)
+        if match:
+            return match.group(0), candidate
+    return None, "unclear"

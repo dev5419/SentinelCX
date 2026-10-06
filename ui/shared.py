@@ -11,9 +11,6 @@ DEMO_USERS = [
     {"user_id": "user_1", "name": "Alice Johnson", "email": "alice@example.com", "verified": True},
     {"user_id": "user_2", "name": "Bob Smith", "email": "bob@example.com", "verified": True},
     {"user_id": "user_3", "name": "Charlie Davis", "email": "charlie@example.com", "verified": False},
-    {"user_id": "user_4", "name": "Diana Prince", "email": "diana@example.com", "verified": True},
-    {"user_id": "user_5", "name": "Evan Wright", "email": "evan@example.com", "verified": True},
-    {"user_id": "user_6", "name": "Fiona Gallagher", "email": "fiona@example.com", "verified": False},
 ]
 
 

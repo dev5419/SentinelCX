@@ -58,16 +58,19 @@ export const SupervisorCommandCenterView: React.FC<SupervisorCommandCenterViewPr
 
   const loadData = useCallback(async () => {
     try {
-      const [tData, aData, logs, pii] = await Promise.all([
+      const [tData, aData, logs, pii] = await Promise.allSettled([
         fetchTickets(),
         fetchApprovals(),
         fetchAuditLogs(undefined, 30),
         fetchPiiFeed(20)
       ]);
-      setTickets(tData);
-      setApprovals(aData);
-      setAuditLogs(logs);
-      setPiiFeed(pii);
+      if (tData.status === 'fulfilled') setTickets(tData.value);
+      if (aData.status === 'fulfilled') setApprovals(aData.value);
+      if (logs.status === 'fulfilled') setAuditLogs(logs.value);
+      if (pii.status === 'fulfilled') setPiiFeed(pii.value);
+      for (const result of [tData, aData, logs, pii]) {
+        if (result.status === 'rejected') console.error('Command Center feed failed:', result.reason);
+      }
     } catch (e) {
       console.error('Failed to load command center data:', e);
     }
@@ -76,7 +79,11 @@ export const SupervisorCommandCenterView: React.FC<SupervisorCommandCenterViewPr
   useEffect(() => {
     loadData();
     const interval = setInterval(loadData, 5000);
-    return () => clearInterval(interval);
+    window.addEventListener('sentinel:reviews-updated', loadData);
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('sentinel:reviews-updated', loadData);
+    };
   }, [loadData]);
 
   // Real-time optimistic approval / rejection handler
@@ -308,7 +315,7 @@ export const SupervisorCommandCenterView: React.FC<SupervisorCommandCenterViewPr
 
                     return (
                       <div
-                        key={appr.approval_id || appr.thread_id}
+                        key={appr.thread_id}
                         className={`p-4 rounded-xl bg-white border border-[#D6D3D1] ${stripeBorder} shadow-xs hover:shadow-md transition-all flex flex-col justify-between`}
                       >
                         <div>

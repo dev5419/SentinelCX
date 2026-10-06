@@ -41,24 +41,26 @@ interface CustomerPortalViewProps {
   onNavigateToSupervisor: () => void;
 }
 
+function welcomeMessages(): Message[] {
+  const timestamp = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  return [
+    { id: 'welcome', sender: 'assistant', content: 'Namaste! Welcome to SentinelCX. How can I help you today?', timestamp },
+    { id: 'order_chooser', sender: 'assistant', content: 'Choose an order or General / FAQ questions.', timestamp },
+  ];
+}
+
 export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
   currentUser,
   onNavigateToSupervisor
 }) => {
   const [threadId, setThreadId] = useState<string>(() => `thread_${Math.random().toString(36).substring(2, 9)}`);
-  const [messages, setMessages] = useState<Message[]>([
-    {
-      id: 'welcome_1',
-      sender: 'assistant',
-      content: 'Namaste! Welcome to SentinelCX. How can I assist you with your orders, refunds, billing, or account today?',
-      timestamp: '10:00 AM',
-      action: 'answer',
-      language: 'en',
-      sentiment: 'neutral',
-      priority: 'Low',
-      grounded: true
-    }
-  ]);
+  const [messages, setMessages] = useState<Message[]>(welcomeMessages);
+  const [selectedContext, setSelectedContext] = useState<string | undefined>();
+  const orders = currentUser?.orders || [];
+  const selectedOrder = orders.find(order => order.order_id === selectedContext);
+  const currentOrders = orders.filter(order => !['refunded', 'cancelled'].includes(order.status) &&
+    (!order.delivery_date || Math.floor((Date.now() - new Date(order.delivery_date).getTime()) / 86400000) <= 14));
+  const pastOrders = orders.filter(order => !currentOrders.includes(order));
   const [inputQuery, setInputQuery] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
 
@@ -71,6 +73,7 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const streamCleanupRef = useRef<(() => void) | null>(null);
+  const requestGeneration = useRef(0);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -86,11 +89,15 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
     };
   }, []);
 
-  const handleSendMessage = async (textToSend?: string, targetThreadId?: string) => {
+  const handleSendMessage = async (textToSend?: string, targetThreadId?: string, targetContext?: string) => {
     const query = (textToSend || inputQuery).trim();
-    if (!query || isProcessing) return;
+    const scope = targetContext || selectedContext;
+    if (!query || isProcessing || !scope || !currentUser) return;
+    const context = scope === 'general' ? { conversation_mode: 'general' as const } :
+      { conversation_mode: 'order' as const, selected_order_id: scope };
     const activeThread = targetThreadId || threadId;
     const requestStartedAt = performance.now();
+    const generation = requestGeneration.current;
 
     // Append User Message
     const userMsg: Message = {
@@ -120,6 +127,7 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
         query,
         currentUser?.user_id || 'user_1',
         (eventType, data) => {
+          if (generation !== requestGeneration.current) return;
           eventCount++;
 
           if (eventType === 'node_start') {
@@ -148,6 +156,7 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
             const why: WhyDecision | undefined = data.why_decision;
             setCurrentWhyDecision(why);
             setIsCurrentPendingApproval(Boolean(data.is_pending_approval));
+            if (data.is_pending_approval) window.dispatchEvent(new Event('sentinel:reviews-updated'));
 
             const botMsg: Message = {
               id: `bot_${Date.now()}`,
@@ -181,12 +190,15 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
           }
         },
         async (streamErr) => {
+          if (generation !== requestGeneration.current) return;
           // Fallback to synchronous REST endpoint if SSE stream fails or is closed
           if (eventCount === 0) {
             try {
-              const res = await sendChatTurn(activeThread, query, currentUser?.user_id || 'user_1');
+              const res = await sendChatTurn(activeThread, query, currentUser.user_id, context);
+              if (generation !== requestGeneration.current) return;
               setCurrentWhyDecision(res.why_decision);
               setIsCurrentPendingApproval(Boolean(res.is_pending_approval));
+              if (res.is_pending_approval) window.dispatchEvent(new Event('sentinel:reviews-updated'));
               setCurrentTrace(res.trace);
               setCompletedNodes(new Set(res.trace.map((step) => step.node)));
 
@@ -207,6 +219,7 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
               };
               setMessages((prev) => [...prev, botMsg]);
             } catch (restErr: any) {
+              if (generation !== requestGeneration.current) return;
               setMessages((prev) => [
                 ...prev,
                 {
@@ -218,8 +231,10 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
                 }
               ]);
             } finally {
-              setIsProcessing(false);
-              setActiveNode(null);
+              if (generation === requestGeneration.current) {
+                setIsProcessing(false);
+                setActiveNode(null);
+              }
             }
           } else {
             console.warn('SSE stream interrupted midway:', streamErr);
@@ -233,7 +248,8 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
               action: 'clarify',
             }]);
           }
-        }
+        },
+        context
       );
       streamCleanupRef.current = unsubscribe;
     } catch (e: any) {
@@ -251,34 +267,47 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
   };
 
   const handleSelectScenario = (scenario: any) => {
+    const orderId = scenario.query.match(/\bORD-\d+\b/i)?.[0]?.toUpperCase();
+    const scope = orderId || 'general';
+    if (orderId && !orders.some(order => order.order_id === orderId)) {
+      setMessages(previous => [...previous, { id: `scope_error_${Date.now()}`, sender: 'assistant',
+        content: 'That order is not accessible to this account. Please choose an order from your list.',
+        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) }]);
+      setInputQuery('');
+      return;
+    }
+    setSelectedContext(scope);
     const newThread = `thread_${Math.random().toString(36).substring(2, 9)}`;
     setThreadId(newThread);
     setInputQuery(scenario.query);
-    handleSendMessage(scenario.query, newThread);
+    setMessages([...welcomeMessages(), { id: `scope_${Date.now()}`, sender: 'assistant',
+      content: scope === 'general' ? 'General / FAQ conversation selected.' : `This conversation is about ${scope}.`, timestamp: new Date().toLocaleTimeString() }]);
+    handleSendMessage(scenario.query, newThread, scope);
   };
 
   const handleNewSession = () => {
+    requestGeneration.current++;
     streamCleanupRef.current?.();
     streamCleanupRef.current = null;
     setIsProcessing(false);
     setActiveNode(null);
     const newThread = `thread_${Math.random().toString(36).substring(2, 9)}`;
     setThreadId(newThread);
-    setMessages([
-      {
-        id: `welcome_${Date.now()}`,
-        sender: 'assistant',
-        content: `New session started (${newThread}). How may I assist you today?`,
-        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        action: 'answer',
-        grounded: true
-      }
-    ]);
+    setMessages(welcomeMessages());
+    setSelectedContext(undefined);
+    setInputQuery('');
     setCompletedNodes(new Set());
     setCurrentTrace([]);
     setCurrentWhyDecision(undefined);
     setIsCurrentPendingApproval(false);
   };
+
+  const chooseContext = (scope: string) => {
+    handleNewSession();
+    setSelectedContext(scope);
+  };
+
+  useEffect(() => { handleNewSession(); }, [currentUser?.user_id]);
 
   return (
     <div className="max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-12 gap-6 h-[calc(100vh-100px)] min-h-[680px]">
@@ -299,7 +328,7 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
                 </span>
               </div>
               <p className="text-[11px] text-[#57534E]">
-                User: <span className="text-[#1C1917] font-semibold">{currentUser?.name || 'Ananya'}</span> ({currentUser?.email})
+                User: <span className="text-[#1C1917] font-semibold">{currentUser?.name || 'Select a user'}</span> ({currentUser?.email})
                 {currentUser?.is_verified ? (
                   <span className="ml-1 text-[#16A34A] font-semibold text-[10px]">✓ Verified</span>
                 ) : (
@@ -312,6 +341,7 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
           <div className="flex items-center space-x-2">
             <button
               onClick={handleNewSession}
+              disabled={isProcessing}
               title="Start a fresh conversation thread"
               className="px-3 py-1.5 rounded-lg bg-[#F5F5F4] hover:bg-[#E7E5E4] text-[#57534E] hover:text-[#1C1917] transition-all border border-[#D6D3D1] text-xs font-semibold flex items-center gap-1.5 cursor-pointer shadow-xs"
             >
@@ -345,6 +375,21 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
                       : 'bg-[#FFFFFF] text-[#1C1917] border border-[#D6D3D1] rounded-tl-none shadow-xs'
                   }`}
                 >
+                  {msg.id === 'order_chooser' && <div className="space-y-3 mt-3">
+                    {([{ title: 'Current orders', list: currentOrders }, { title: 'Past orders', list: pastOrders }]).map(group => <div key={group.title}>
+                      <h3 className="font-semibold mb-2">{group.title}</h3>
+                      <div className="grid gap-2">{group.list.map(order => <button key={order.order_id}
+                        disabled={isProcessing} aria-pressed={selectedContext === order.order_id}
+                        onClick={() => chooseContext(order.order_id)}
+                        className={`text-left rounded-lg border px-3 py-2 disabled:opacity-50 ${selectedContext === order.order_id ? 'border-[#C2410C] bg-[#FFF7ED]' : 'border-[#D6D3D1] hover:bg-[#F5F5F4]'}`}>
+                        <span className="font-semibold">{order.order_id} · {order.item_name}</span>
+                        <span className="block text-[#57534E]">Rs {order.amount.toLocaleString('en-IN')} · {order.status}</span>
+                      </button>)}</div>
+                      {!group.list.length && <p className="text-[#78716C]">No {group.title.toLowerCase()}.</p>}
+                    </div>)}
+                    <button disabled={isProcessing || !currentUser} aria-pressed={selectedContext === 'general'} onClick={() => chooseContext('general')}
+                      className="w-full text-left rounded-lg border border-[#C2410C] text-[#C2410C] p-3 font-semibold disabled:opacity-50">General / FAQ questions →</button>
+                  </div>}
                   {/* Assistant Header Badges */}
                   {msg.sender === 'assistant' && (
                     <div className="flex flex-wrap items-center gap-1.5 mb-2 pb-2 border-b border-[#D6D3D1] text-[10px]">
@@ -390,10 +435,10 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
                     <div className="mt-3 p-3.5 rounded-lg bg-[#FFFBEB] border border-[#F59E0B] text-[#92400E]">
                       <div className="flex items-center space-x-2 font-bold text-xs mb-1">
                         <AlertCircle className="w-4 h-4 text-[#F59E0B] animate-pulse" />
-                        <span>APPROVAL GATE ACTIVATED (&gt; Rs 2,000)</span>
+                        <span>HUMAN REVIEW PENDING</span>
                       </div>
                       <p className="text-[11px] text-[#B45309] leading-relaxed">
-                        This high-value transaction has paused execution at the Human-in-the-Loop policy gate. You can inspect the full handoff dossier and approve or decline in the Supervisor Command Center.
+                        This request is awaiting human review. You can inspect the handoff dossier and approve or decline in Command Center.
                       </p>
                       <button
                         onClick={onNavigateToSupervisor}
@@ -447,6 +492,10 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
 
         {/* Input Bar */}
         <div className="p-3 border-t border-[#D6D3D1] bg-[#E7E5E4]/60">
+          {selectedOrder && <p className="mb-2 text-[11px] text-[#57534E]" aria-live="polite">
+            Selected: <strong className="text-[#1C1917]">{selectedOrder.item_name} · {selectedOrder.order_id}</strong>
+          </p>}
+          {selectedContext === 'general' && <p className="mb-2 text-[11px] font-semibold text-[#57534E]">General / FAQ</p>}
           <form
             onSubmit={(e) => {
               e.preventDefault();
@@ -458,13 +507,13 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
               type="text"
               value={inputQuery}
               onChange={(e) => setInputQuery(e.target.value)}
-              placeholder="Ask anything in English or Hinglish (e.g. 'ORD-1001 ka refund chahiye', 'policy window', etc.)..."
-              disabled={isProcessing}
+              placeholder={!selectedContext ? 'Select an order or General / FAQ above to start…' : selectedContext === 'general' ? 'Ask a general or FAQ question…' : `Ask about ${selectedContext} in English or Hinglish…`}
+              disabled={isProcessing || !selectedContext || !currentUser}
               className="flex-1 bg-white border border-[#D6D3D1] focus:border-[#C2410C] rounded-lg px-4 py-2.5 text-xs text-[#1C1917] placeholder-[#78716C] focus:outline-none transition-all shadow-xs"
             />
             <button
               type="submit"
-              disabled={isProcessing || !inputQuery.trim()}
+              disabled={isProcessing || !inputQuery.trim() || !selectedContext || !currentUser}
               className="px-4 py-2.5 rounded-lg bg-[#C2410C] hover:bg-[#9A3412] disabled:opacity-50 text-white font-semibold text-xs flex items-center gap-1.5 transition-all cursor-pointer shadow-xs hover:shadow-md"
             >
               <Send className="w-4 h-4" />
