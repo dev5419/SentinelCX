@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+import math
 from typing import Dict, Any, Optional
 
 from config import REFUND_WINDOW_DAYS, REFUND_AUTO_APPROVE_LIMIT
@@ -42,7 +43,18 @@ def evaluate_refund_policy(
     """
     order_id = order.get("order_id", "UNKNOWN")
     user_id = user.get("user_id", "UNKNOWN")
-    amount = float(requested_amount) if requested_amount is not None else float(order.get("amount", 0.0))
+    try:
+        amount = float(requested_amount) if requested_amount is not None else float(order.get("amount", 0.0))
+        valid_amount = math.isfinite(amount) and 0 < amount <= float(order.get("amount", 0.0))
+    except (ValueError, TypeError, OverflowError):
+        amount, valid_amount = None, False
+    if not valid_amount:
+        result = {"eligible": False, "requires_human_approval": False,
+                  "reason": "Refund amount must be finite, positive, and no greater than the order total.",
+                  "policy_quote": "Refunds cannot exceed the original purchase amount."}
+        log_audit(session, "policy_gate.evaluate_refund_policy", {"order_id": order_id, "user_id": user_id},
+                  "REJECTED", result["reason"], db_path=db_path)
+        return result
 
     # Rule 1: User ownership match
     if order.get("user_id") != user.get("user_id"):

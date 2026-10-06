@@ -22,6 +22,16 @@ def setup_test_db():
     reset_db()
 
 
+@pytest.fixture(autouse=True)
+def mock_semantic_screening():
+    # This suite exercises deterministic controls; semantic verdict handling is
+    # covered separately in test_semantic_security.py without provider calls.
+    with patch("agents.injection_guard.classify_security_intent", return_value={
+        "status": "allow", "category": "BENIGN", "confidence": 0.99
+    }):
+        yield
+
+
 def make_mock_llm_response(text: str):
     mock = MagicMock()
     mock.content = text

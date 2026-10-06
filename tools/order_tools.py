@@ -1,7 +1,7 @@
 import uuid
 from typing import Dict, Any, Optional
 
-from config import REFUND_AUTO_APPROVE_LIMIT
+from config import REFUND_AUTO_APPROVE_LIMIT, AUTHORIZED_SUPERVISOR_IDS
 from policy.policy_gate import evaluate_refund_policy
 from utils.mock_db import (
     get_order,
@@ -19,13 +19,7 @@ def is_human_supervisor(approved_by: Optional[str]) -> bool:
     disallowed = {"llm", "ai", "bot", "system", "auto", "automated", "none", "null", ""}
     if normalized in disallowed:
         return False
-    return (
-        normalized.startswith("sup_")
-        or normalized.startswith("supervisor_")
-        or normalized.startswith("human_")
-        or "supervisor" in normalized
-        or "human" in normalized
-    )
+    return normalized in AUTHORIZED_SUPERVISOR_IDS
 
 
 def lookup_order(

@@ -24,7 +24,7 @@ if BASE_DIR not in sys.path:
     sys.path.insert(0, BASE_DIR)
 
 from core.graph import build_graph, SupportState
-from tools.order_tools import execute_refund
+from tools.order_tools import execute_refund, is_human_supervisor
 from utils.mock_db import (
     reset_db,
     get_user,
@@ -503,7 +503,7 @@ def _sanitize_for_export(obj: Any) -> Any:
         return [_sanitize_for_export(i) for i in obj]
     elif isinstance(obj, str):
         # Additional safety check against phone/email leaks
-        return mask_pii(obj).get("sanitized_text", obj)
+        return mask_pii(obj)["sanitized_query"]
     return obj
 
 
@@ -689,7 +689,7 @@ async def chat_stream(
 
     async def sse_generator() -> AsyncGenerator[str, None]:
         # Emit initial start event
-        yield f"event: start\ndata: {json.dumps({'thread_id': thread_id, 'query': user_query})}\n\n"
+        yield f"event: start\ndata: {json.dumps(_sanitize_for_export({'thread_id': thread_id, 'query': user_query}))}\n\n"
 
         accumulated_trace = []
         final_state = {}
@@ -775,7 +775,7 @@ async def chat_stream(
                             "amount_at_risk": amount
                         }
 
-                        yield f"event: interrupt\ndata: {json.dumps({'thread_id': thread_id, 'approval_id': pending_id, 'interrupt': intr_val})}\n\n"
+                        yield f"event: interrupt\ndata: {json.dumps(_sanitize_for_export({'thread_id': thread_id, 'approval_id': pending_id, 'interrupt': intr_val}))}\n\n"
                         continue
 
                     if not isinstance(node_update, dict):
@@ -800,7 +800,7 @@ async def chat_stream(
                         "duration_ms": dur,
                         "timestamp": datetime.now(timezone.utc).isoformat()
                     }
-                    yield f"event: node_complete\ndata: {json.dumps(event_payload)}\n\n"
+                    yield f"event: node_complete\ndata: {json.dumps(_sanitize_for_export(event_payload))}\n\n"
                     final_state.update(node_update)
                     await asyncio.sleep(0.05)  # brief pacing for smooth UI animation
 
@@ -869,7 +869,7 @@ async def chat_stream(
                 }
 
                 if is_int:
-                    yield f"event: interrupt\ndata: {json.dumps({'thread_id': thread_id, 'approval_id': pending_id, 'interrupt': interrupt_val})}\n\n"
+                    yield f"event: interrupt\ndata: {json.dumps(_sanitize_for_export({'thread_id': thread_id, 'approval_id': pending_id, 'interrupt': interrupt_val}))}\n\n"
 
             # Always update ACTIVE_TICKETS for every completed stream turn
             ticket_status = "pending_approval" if is_pending else (
@@ -980,6 +980,8 @@ def decide_approval(
     If refund approval, executes refund in SQLite and logs to audit trail.
     Updates PENDING_APPROVALS, APPROVAL_HISTORY, and ACTIVE_TICKETS in real time.
     """
+    if not is_human_supervisor(decision_req.supervisor_id):
+        raise HTTPException(status_code=403, detail="Supervisor ID is not authorized for demo approvals.")
     pending_item = PENDING_APPROVALS.get(thread_id)
     cfg = {"configurable": {"thread_id": thread_id}}
     state = graph.get_state(cfg)
@@ -1348,7 +1350,10 @@ def test_custom_attack(req: CustomAttackRequest):
             action = result.get("action", "answer")
             reason = (result.get("why_decision") or {}).get("reason") or "Query completed through the support pipeline."
             layer, rule, taxonomy = None, "CUSTOM_INQUIRY", "CUSTOM_INQUIRY"
-            if blocked:
+            if "Security review required" in injection.get("summary", ""):
+                layer, rule, taxonomy = "injection", "SECURITY_REVIEW_REQUIRED", "SECURITY_REVIEW_REQUIRED"
+                reason = "Semantic security screening was inconclusive or unavailable. Execution was held for review."
+            elif blocked:
                 match = re.search(r"\(([^)]+)\)", injection.get("summary", ""))
                 rule = match.group(1) if match else "INJECTION_BLOCKED"
                 taxonomy = "FORGED_STATE_COMMAND" if re.search(r"command\s*\(\s*resume", query, re.I) else rule

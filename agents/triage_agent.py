@@ -6,6 +6,7 @@ from typing import Dict, Any, Optional, Literal
 from pydantic import BaseModel, Field, field_validator
 
 from config import LLM
+from agents.pii_guard import mask_pii
 from utils.mock_db import get_order
 
 
@@ -250,13 +251,13 @@ def triage_agent(state: Dict[str, Any]) -> Dict[str, Any]:
     - Amount at risk > 10,000 -> priority = Critical
     - Computes SLA deadline per priority
     """
-    query = state.get("sanitized_query") or state.get("user_query", "")
+    query = mask_pii(state.get("sanitized_query") or state.get("user_query", ""))["sanitized_query"]
     history = state.get("history", [])
     recent_turns = history[-4:] if history else []
     history_context = ""
     if recent_turns:
         history_context = "\nRecent Conversation Turns:\n" + "\n".join(
-            f"{t.get('role', 'user').capitalize()}: {t.get('content', '')}" for t in recent_turns
+            f"{t.get('role', 'user').capitalize()}: {mask_pii(t.get('content', ''))['sanitized_query']}" for t in recent_turns
         )
 
     # 1. Call LLM (with 1 retry on parse failure)
@@ -273,18 +274,17 @@ def triage_agent(state: Dict[str, Any]) -> Dict[str, Any]:
         triage_obj = _heuristic_triage_fallback(query, history=history)
 
     # 2. Extract or confirm Order ID from query using precise regex
-    order_id = triage_obj.extracted_order_id
-    if not order_id or order_id == "ORDER":
-        order_match = ORDER_ID_REGEX.search(query)
-        order_id = order_match.group(0).upper() if order_match else None
-        triage_obj.extracted_order_id = order_id
+    # Model output cannot invent a transaction target absent from the input.
+    order_match = ORDER_ID_REGEX.search(query)
+    order_id = order_match.group(0).upper() if order_match else None
+    triage_obj.extracted_order_id = order_id
 
     # 3. Determine Amount at Risk (from query or mock_db order record)
     amount_at_risk = triage_obj.amount_at_risk or _extract_amount_from_query(query)
     if order_id and amount_at_risk is None:
         try:
             ord_row = get_order(order_id)
-            if ord_row:
+            if ord_row and ord_row.get("user_id") == state.get("user_id", "user_1"):
                 amount_at_risk = float(ord_row.get("amount", 0.0))
         except Exception:
             pass

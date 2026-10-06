@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 import tempfile
 import time
+import json
 from types import SimpleNamespace
 import unittest
 
@@ -79,6 +80,7 @@ class FAQRegressionTests(unittest.TestCase):
         answer = "Return requests must be submitted within 14 days of delivery. Eligible refunds up to Rs 2,000 are automatically approved."
         namespace = {
             "SupportState": dict, "Dict": dict, "Any": object, "time": time,
+            "json": json, "mask_pii": lambda query: {"sanitized_query": query},
             "normalize_to_english": lambda q, lang: q,
             "retrieve_with_scores": lambda *args, **kwargs: [(doc, 0.9)],
             "build_citation": lambda d, s: {"title": "Return policy", "source": str(article), "score": s},
