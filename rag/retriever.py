@@ -1,9 +1,12 @@
 import os
 import glob
+import hashlib
 from functools import lru_cache
 from typing import Dict, Any, List, Tuple
 from langchain_chroma import Chroma
 from langchain_huggingface import HuggingFaceEmbeddings
+from langchain_core.documents import Document
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 from config import CHROMA_DIR, BASE_DIR
 
 @lru_cache(maxsize=1)
@@ -14,10 +17,41 @@ def get_embeddings():
 
 @lru_cache(maxsize=1)
 def get_vectorstore():
-    return Chroma(
+    vectorstore = Chroma(
         persist_directory=CHROMA_DIR,
         embedding_function=get_embeddings()
     )
+    sync_documents(vectorstore)
+    return vectorstore
+
+
+def sync_documents(vectorstore):
+    """Index missing or changed FAQ articles without requiring a manual ingest."""
+    splitter = RecursiveCharacterTextSplitter(chunk_size=1200, chunk_overlap=150)
+    for path in sorted(glob.glob(os.path.join(BASE_DIR, "data", "docs", "*", "*.md"))):
+        with open(path, encoding="utf-8") as article:
+            content = article.read()
+        if not content.strip():
+            continue
+        source = os.path.relpath(path, BASE_DIR)
+        digest = hashlib.sha256(content.encode("utf-8")).hexdigest()
+        existing = vectorstore.get(where={"source": source})
+        metadata = existing.get("metadatas") or []
+        if metadata and all(m.get("content_hash") == digest for m in metadata):
+            continue
+        document = Document(page_content=content, metadata={
+            "source": source,
+            "category": os.path.basename(os.path.dirname(path)),
+            "title": content.strip().splitlines()[0].lstrip("# "),
+            "content_hash": digest,
+        })
+        chunks = splitter.split_documents([document])
+        ids = [hashlib.sha256(f"{source}:{digest}:{i}".encode()).hexdigest()
+               for i in range(len(chunks))]
+        vectorstore.add_documents(chunks, ids=ids)
+        old_ids = [item for item in existing.get("ids", []) if item not in ids]
+        if old_ids:
+            vectorstore.delete(ids=old_ids)
 
 def get_retriever(category: str = None, k: int = 4):
     vectorstore = get_vectorstore()

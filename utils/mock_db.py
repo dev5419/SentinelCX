@@ -1,24 +1,47 @@
 import sqlite3
 import os
 import json
+from contextlib import contextmanager
+from contextvars import ContextVar
 from datetime import datetime, timedelta, timezone
 from typing import Optional, Dict, Any, List
 
 from config import MOCK_DB_PATH
 
 
+_sandbox_db = ContextVar("sandbox_db", default=None)
+
+
+class _ClosingConnection(sqlite3.Connection):
+    def __exit__(self, *args):
+        try:
+            return super().__exit__(*args)
+        finally:
+            self.close()
+
+
+@contextmanager
+def sandbox_database(path: str):
+    """Route this execution's tools to an isolated DB, including graph workers."""
+    token = _sandbox_db.set(path)
+    try:
+        yield
+    finally:
+        _sandbox_db.reset(token)
+
+
 def get_db(db_path: Optional[str] = None) -> sqlite3.Connection:
     """Returns a SQLite connection with row_factory configured."""
-    target_path = db_path or MOCK_DB_PATH
+    target_path = db_path or _sandbox_db.get() or MOCK_DB_PATH
     os.makedirs(os.path.dirname(os.path.abspath(target_path)), exist_ok=True)
-    conn = sqlite3.connect(target_path)
+    conn = sqlite3.connect(target_path, factory=_ClosingConnection)
     conn.row_factory = sqlite3.Row
     return conn
 
 
 def init_db(db_path: Optional[str] = None, force_seed: bool = False):
     """Initializes tables and seeds test data if empty or force_seed is True."""
-    target_path = db_path or MOCK_DB_PATH
+    target_path = db_path or _sandbox_db.get() or MOCK_DB_PATH
     os.makedirs(os.path.dirname(os.path.abspath(target_path)), exist_ok=True)
 
     with get_db(target_path) as conn:
@@ -388,7 +411,7 @@ def log_audit(
     db_path: Optional[str] = None
 ) -> int:
     """Appends an immutable audit record to the audit_log table."""
-    target_path = db_path or MOCK_DB_PATH
+    target_path = db_path or _sandbox_db.get() or MOCK_DB_PATH
     init_db(target_path)
     
     timestamp = datetime.now(timezone.utc).isoformat()
@@ -407,7 +430,7 @@ def log_audit(
 
 def get_user(user_id: str, db_path: Optional[str] = None) -> Optional[Dict[str, Any]]:
     """Fetches user record as dict."""
-    target_path = db_path or MOCK_DB_PATH
+    target_path = db_path or _sandbox_db.get() or MOCK_DB_PATH
     init_db(target_path)
     with get_db(target_path) as conn:
         cursor = conn.cursor()
@@ -418,7 +441,7 @@ def get_user(user_id: str, db_path: Optional[str] = None) -> Optional[Dict[str, 
 
 def get_order(order_id: str, db_path: Optional[str] = None) -> Optional[Dict[str, Any]]:
     """Fetches order record as dict."""
-    target_path = db_path or MOCK_DB_PATH
+    target_path = db_path or _sandbox_db.get() or MOCK_DB_PATH
     init_db(target_path)
     with get_db(target_path) as conn:
         cursor = conn.cursor()
@@ -429,7 +452,7 @@ def get_order(order_id: str, db_path: Optional[str] = None) -> Optional[Dict[str
 
 def get_orders_for_user(user_id: str, db_path: Optional[str] = None) -> List[Dict[str, Any]]:
     """Fetches all orders associated with a user."""
-    target_path = db_path or MOCK_DB_PATH
+    target_path = db_path or _sandbox_db.get() or MOCK_DB_PATH
     init_db(target_path)
     with get_db(target_path) as conn:
         cursor = conn.cursor()
@@ -439,7 +462,7 @@ def get_orders_for_user(user_id: str, db_path: Optional[str] = None) -> List[Dic
 
 def get_refunds_for_order(order_id: str, db_path: Optional[str] = None) -> List[Dict[str, Any]]:
     """Fetches all refunds associated with an order."""
-    target_path = db_path or MOCK_DB_PATH
+    target_path = db_path or _sandbox_db.get() or MOCK_DB_PATH
     init_db(target_path)
     with get_db(target_path) as conn:
         cursor = conn.cursor()
@@ -458,7 +481,7 @@ def record_refund(
     db_path: Optional[str] = None
 ) -> Dict[str, Any]:
     """Records a refund and updates order status to 'refunded' atomically."""
-    target_path = db_path or MOCK_DB_PATH
+    target_path = db_path or _sandbox_db.get() or MOCK_DB_PATH
     init_db(target_path)
     now_str = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
 
@@ -496,7 +519,7 @@ def get_audit_logs(
     **kwargs
 ) -> List[Dict[str, Any]]:
     """Fetches recent audit log entries."""
-    target_path = db_path or MOCK_DB_PATH
+    target_path = db_path or _sandbox_db.get() or MOCK_DB_PATH
     init_db(target_path)
     with get_db(target_path) as conn:
         cursor = conn.cursor()

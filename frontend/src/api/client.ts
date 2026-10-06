@@ -161,6 +161,55 @@ export interface RedteamReport {
   results: RedteamAttackResult[];
 }
 
+export interface CustomAttackRequest {
+  user_query: string;
+  user_id: 'user_1' | 'user_2' | 'user_3';
+  order_id?: string;
+  preset_category?: string;
+}
+
+export interface CustomAttackResult {
+  session_id: string;
+  timestamp: string;
+  user_id: string;
+  sanitized_query: string;
+  preset_category?: string;
+  threat_taxonomy: string;
+  stopping_layer: string | null;
+  rule_code: string;
+  reason: string;
+  response: string;
+  action: string;
+  outcome: 'blocked' | 'allowed' | 'review' | 'failed';
+  grounded: boolean | null;
+  pii_counts: Record<string, number>;
+  integrity: {
+    passed: boolean;
+    unauthorized_mutations: number;
+    authorized_refunds: number;
+    business_state_unchanged: boolean;
+    scope: string;
+    live_database_accessed: boolean;
+    outbound_pii_leaks: number;
+  };
+  trace: TraceStep[];
+  audit_log: AuditRecord[];
+  duration_ms: number;
+}
+
+export async function testCustomAttack(request: CustomAttackRequest): Promise<CustomAttackResult> {
+  const res = await fetch(`${API_BASE_URL}/redteam/test`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(request),
+  });
+  if (!res.ok) {
+    const error = await res.json().catch(() => null);
+    throw new Error(typeof error?.detail === 'string' ? error.detail : 'Sandbox attack execution failed');
+  }
+  return res.json();
+}
+
 // ============================================================================
 // API Client Functions
 // ============================================================================
