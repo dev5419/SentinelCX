@@ -11,6 +11,14 @@ from config import MOCK_DB_PATH
 
 _sandbox_db = ContextVar("sandbox_db", default=None)
 
+# Preserve verified/unverified scenarios while consolidating legacy owners.
+DEMO_USER_REASSIGNMENTS = {
+    "user_4": "user_1", "user_5": "user_2", "user_6": "user_3",
+    "user_7": "user_1", "user_8": "user_2", "user_9": "user_1",
+    "user_10": "user_3", "user_11": "user_2", "user_12": "user_1",
+    "user_13": "user_2", "user_14": "user_3", "user_15": "user_1",
+}
+
 
 class _ClosingConnection(sqlite3.Connection):
     def __exit__(self, *args):
@@ -109,6 +117,22 @@ def init_db(db_path: Optional[str] = None, force_seed: bool = False):
             _ensure_alice_scenarios(conn)
         elif conn.execute("PRAGMA user_version").fetchone()[0] < 1:
             _ensure_alice_scenarios(conn)
+        if conn.execute("PRAGMA user_version").fetchone()[0] < 2:
+            _consolidate_demo_users(conn)
+
+
+def _consolidate_demo_users(conn):
+    """Keep all orders and refunds; only migrate their owner references."""
+    retained = {row[0] for row in conn.execute("SELECT user_id FROM users WHERE user_id IN ('user_1','user_2','user_3')")}
+    if retained != {"user_1", "user_2", "user_3"}:
+        raise ValueError("Alice, Bob and Charlie must exist before consolidating demo users.")
+    for old_user, new_user in DEMO_USER_REASSIGNMENTS.items():
+        conn.execute("UPDATE orders SET user_id = ? WHERE user_id = ?", (new_user, old_user))
+        conn.execute("UPDATE refunds SET user_id = ? WHERE user_id = ?", (new_user, old_user))
+    conn.execute("DELETE FROM users WHERE user_id NOT IN ('user_1','user_2','user_3')")
+    if conn.execute("PRAGMA foreign_key_check").fetchall():
+        raise ValueError("Demo user consolidation would leave orphaned records.")
+    conn.execute("PRAGMA user_version = 2")
 
 
 def _ensure_alice_scenarios(conn):
@@ -141,25 +165,11 @@ def _seed_data(conn: sqlite3.Connection):
     now = datetime.now(timezone.utc)
     fmt = "%Y-%m-%d"
 
-    # Seed 15 users: 11 verified, 4 unverified
+    # The same three customers are used throughout the demo.
     users = [
-        # Original 6 baseline users (required for tests)
         ("user_1", "Alice Johnson", "alice@example.com", 1),
         ("user_2", "Bob Smith", "bob@example.com", 1),
         ("user_3", "Charlie Davis", "charlie@example.com", 0),  # unverified user
-        ("user_4", "Diana Prince", "diana@example.com", 1),
-        ("user_5", "Evan Wright", "evan@example.com", 1),
-        ("user_6", "Fiona Gallagher", "fiona@example.com", 0),  # unverified user
-        # Additional enterprise demo users
-        ("user_7", "Gaurav Malhotra", "gaurav.m@example.com", 1),
-        ("user_8", "Pooja Hegde", "pooja.h@example.com", 1),
-        ("user_9", "Vikramaditya Rao", "vikram.rao@example.com", 1),
-        ("user_10", "Sneha Kulkarni", "sneha.k@example.com", 0),  # unverified user
-        ("user_11", "Rohan Mehta", "rohan.mehta@example.com", 1),
-        ("user_12", "Ananya Iyer", "ananya.iyer@example.com", 1),
-        ("user_13", "Kabir Singh", "kabir.s@example.com", 1),
-        ("user_14", "Meera Nambiar", "meera.n@example.com", 0),  # unverified user
-        ("user_15", "Arjun Kapoor", "arjun.k@example.com", 1),
     ]
     cursor.executemany(
         "INSERT INTO users (user_id, name, email, is_verified) VALUES (?, ?, ?, ?)",
@@ -329,7 +339,7 @@ def _seed_data(conn: sqlite3.Connection):
         """INSERT INTO orders 
            (order_id, user_id, item_name, amount, currency, status, purchase_date, delivery_date) 
            VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-        orders
+        [(row[0], DEMO_USER_REASSIGNMENTS.get(row[1], row[1]), *row[2:]) for row in orders]
     )
 
     # Seed refunds
@@ -349,7 +359,7 @@ def _seed_data(conn: sqlite3.Connection):
         """INSERT INTO refunds 
            (refund_id, order_id, user_id, amount, reason, status, approved_by, created_at) 
            VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-        refunds
+        [(row[0], row[1], DEMO_USER_REASSIGNMENTS.get(row[2], row[2]), *row[3:]) for row in refunds]
     )
 
     # Seed baseline audit_log entries

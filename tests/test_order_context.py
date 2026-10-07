@@ -147,11 +147,36 @@ class OrderContextTests(unittest.TestCase):
         self.assertTrue({"delivered", "processing", "shipped", "refunded", "cancelled"} <= {o["status"] for o in orders})
         self.assertEqual(self.db.get_order("ORD-1002")["status"], "delivered")
         self.assertEqual(len(self.db.get_refunds_for_order("ORD-1054")), 1)
+
         refund = self.tools.execute_refund("ORD-1001", 1499, "test", user_id="user_1")
         self.assertTrue(refund["success"])
         self.db.init_db()
         self.assertEqual(self.db.get_order("ORD-1001")["status"], "refunded")
         self.assertEqual(len(self.db.get_refunds_for_order("ORD-1054")), 1)
+
+    def test_consolidation_preserves_data_and_refund_ownership(self):
+        with self.db.get_db() as conn:
+            self.assertEqual(conn.execute("SELECT COUNT(*) FROM users").fetchone()[0], 3)
+            conn.executemany("INSERT INTO users VALUES (?,?,?,?)", [
+                ("user_4", "Legacy verified", "legacy@example.com", 1),
+                ("user_6", "Legacy unverified", "old@example.com", 0)])
+            conn.execute("UPDATE orders SET user_id='user_4' WHERE order_id='ORD-1054'")
+            conn.execute("UPDATE refunds SET user_id='user_4' WHERE order_id='ORD-1054'")
+            conn.execute("UPDATE orders SET user_id='user_6' WHERE order_id='ORD-1026'")
+            conn.execute("PRAGMA user_version=1")
+            before = {table: [dict(row) for row in conn.execute(f'SELECT * FROM {table}')]
+                      for table in ["orders", "refunds", "audit_log"]}
+        self.db.init_db()
+        with self.db.get_db() as conn:
+            self.assertEqual({row[0] for row in conn.execute("SELECT user_id FROM users")}, {"user_1", "user_2", "user_3"})
+            self.assertEqual(conn.execute("PRAGMA foreign_key_check").fetchall(), [])
+            for table, rows in before.items():
+                after = [dict(row) for row in conn.execute(f'SELECT * FROM {table}')]
+                self.assertEqual([{k: v for k, v in row.items() if k != "user_id"} for row in rows],
+                                 [{k: v for k, v in row.items() if k != "user_id"} for row in after])
+            self.assertEqual(conn.execute("SELECT COUNT(*) FROM refunds r JOIN orders o ON o.order_id=r.order_id WHERE r.user_id != o.user_id").fetchone()[0], 0)
+        self.assertEqual(self.db.get_order("ORD-1026")["user_id"], "user_3")
+        self.assertEqual(self.db.get_order("ORD-1054")["user_id"], "user_1")
 
 
 if __name__ == "__main__":
